@@ -23,7 +23,7 @@ export function authConfig(): NextAuthConfig {
         if (isPublicPath(pathname) || auth?.user) return true;
         // Redirect ourselves (instead of returning false) so callbackUrl is a
         // relative path, which safeRedirectPath accepts after sign-in.
-        const signInUrl = new URL('/signin', request.nextUrl);
+        const signInUrl = new URL('/signin', request.url);
         signInUrl.searchParams.set('callbackUrl', `${pathname}${search}`);
         return Response.redirect(signInUrl);
       },
