@@ -22,6 +22,31 @@ describe('gwenshap', () => {
     });
   });
 
+  it.each([
+    ['**Sales Rep**: Hello.\n**Customer**: Hi.'],
+    ['**Sales Rep:** Hello.\n**Customer:** Hi.'],
+    ['Sales Rep: Hello.\nCustomer: Hi.'],
+  ])('parses each label style found in the real files: %j', (text) => {
+    expect(parseGwenshapTranscript(text)).toEqual({
+      ok: true,
+      turns: [
+        { speaker: 'rep', text: 'Hello.' },
+        { speaker: 'prospect', text: 'Hi.' },
+      ],
+    });
+  });
+
+  it('treats an unknown plain "Word:" line as continuation text, not a speaker', () => {
+    const r = parseGwenshapTranscript('Sales Rep: Our plans:\nPrice: $50 a month.\nCustomer: Ok.');
+    expect(r).toEqual({
+      ok: true,
+      turns: [
+        { speaker: 'rep', text: 'Our plans: Price: $50 a month.' },
+        { speaker: 'prospect', text: 'Ok.' },
+      ],
+    });
+  });
+
   it('skips a transcript with an unknown speaker rather than guessing', () => {
     expect(parseGwenshapTranscript('**Narrator**: x\n**Customer**: y')).toEqual({
       ok: false,

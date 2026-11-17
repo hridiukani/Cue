@@ -3,11 +3,13 @@ import { estimateTimeline, mapSpeaker, pickMetadata, type Turn } from '../core';
 import type { AdapterItem, DatasetAdapter } from '../types';
 
 /**
- * gwenshap/sales-transcripts: 51 short simulated calls as markdown,
- * "**Sales Rep**: …" / "**Customer**: …". No timestamps, so timing is estimated.
+ * gwenshap/sales-transcripts: 51 short simulated calls. No timestamps, so
+ * timing is estimated. The files mix three label styles (checked against the
+ * real data): "**Sales Rep**: …", "**Sales Rep:** …" and plain "Sales Rep: …".
  */
 
-const LINE = /^\*\*(.+?)\*\*:\s*(.*)$/;
+const BOLD_LABEL = /^\*\*([^*]+?)(?:\*\*:|:\*\*)\s*(.*)$/;
+const PLAIN_LABEL = /^([A-Za-z][A-Za-z .'-]{0,40}?):\s*(.*)$/;
 
 export type ParsedTranscript = { ok: true; turns: Turn[] } | { ok: false; reason: string };
 
@@ -16,13 +18,24 @@ export function parseGwenshapTranscript(text: string): ParsedTranscript {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
-    const m = LINE.exec(line);
-    if (m) {
-      const label = m[1] ?? '';
+
+    const bold = BOLD_LABEL.exec(line);
+    if (bold) {
+      // A bold label is unambiguously a speaker; refuse to guess an unknown one.
+      const label = (bold[1] ?? '').trim();
       const speaker = mapSpeaker(label);
       if (!speaker) return { ok: false, reason: `unknown speaker label "${label}"` };
-      turns.push({ speaker, text: m[2] ?? '' });
-    } else if (turns.length > 0) {
+      turns.push({ speaker, text: bold[2] ?? '' });
+      continue;
+    }
+    const plain = PLAIN_LABEL.exec(line);
+    const plainSpeaker = plain ? mapSpeaker(plain[1] ?? '') : null;
+    if (plain && plainSpeaker) {
+      turns.push({ speaker: plainSpeaker, text: plain[2] ?? '' });
+      continue;
+    }
+    // Anything else (including "Price: $50"-style lines) continues the previous turn.
+    if (turns.length > 0) {
       // A continuation line belongs to the previous speaker.
       const last = turns[turns.length - 1];
       if (last) last.text = `${last.text} ${line}`.trim();
