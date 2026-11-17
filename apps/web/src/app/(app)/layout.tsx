@@ -21,9 +21,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <Link href="/playbooks" className="text-lg font-semibold tracking-tight">
               Cue
             </Link>
-            <nav className="text-sm">
+            <nav className="flex gap-4 text-sm">
               <Link href="/playbooks" className="text-neutral-600 hover:text-neutral-900">
                 Playbooks
+              </Link>
+              <Link href="/calls" className="text-neutral-600 hover:text-neutral-900">
+                Calls
               </Link>
             </nav>
           </div>
