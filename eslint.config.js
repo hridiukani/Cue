@@ -53,6 +53,23 @@ export default defineConfig(
     rules: { 'no-restricted-properties': 'off' },
   },
   {
+    // Code that Next bundles. Turbopack/webpack treat `new URL('<file>', import.meta.url)`
+    // as an asset reference and copy that file into the build output (this once
+    // copied .env into a publicly served folder). Build paths with node:path instead.
+    files: ['apps/web/**/*.{ts,tsx}', 'packages/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'NewExpression[callee.name="URL"] > MemberExpression.arguments[object.type="MetaProperty"][property.name="url"]',
+          message:
+            "Don't use new URL('…', import.meta.url) in bundled code: the bundler copies that file into the build. Use path.resolve(path.dirname(fileURLToPath(import.meta.url)), '…').",
+        },
+      ],
+    },
+  },
+  {
     files: ['apps/web/**/*.{ts,tsx}'],
     extends: [nextPlugin.configs['core-web-vitals'], reactHooks.configs.flat['recommended-latest']],
     settings: { next: { rootDir: 'apps/web' } },

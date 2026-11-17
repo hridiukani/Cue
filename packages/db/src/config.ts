@@ -1,14 +1,4 @@
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-
-/** Load the repo-root .env into process.env if it exists. Real env vars win. */
-export function loadRootEnvFile(): void {
-  try {
-    process.loadEnvFile(fileURLToPath(new URL('../../../.env', import.meta.url)));
-  } catch {
-    // No .env file: use the real environment only.
-  }
-}
 
 const DbEnvSchema = z.object({
   DATABASE_URL: z

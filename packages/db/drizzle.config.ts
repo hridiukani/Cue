@@ -1,5 +1,6 @@
 import { defineConfig } from 'drizzle-kit';
-import { loadDbConfig, loadRootEnvFile } from './src/config';
+import { loadDbConfig } from './src/config';
+import { loadRootEnvFile } from './src/env-file';
 
 // drizzle-kit is run by hand, so pick up the repo-root .env if there is one.
 loadRootEnvFile();

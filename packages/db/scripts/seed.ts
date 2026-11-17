@@ -1,5 +1,6 @@
 import { createDb } from '../src/client';
-import { loadDbConfig, loadRootEnvFile } from '../src/config';
+import { loadDbConfig } from '../src/config';
+import { loadRootEnvFile } from '../src/env-file';
 import { seedDemo } from '../src/seed';
 
 loadRootEnvFile();

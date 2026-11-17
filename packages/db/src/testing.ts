@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import postgres from 'postgres';
-import { loadRootEnvFile, loadTestDbConfig } from './config';
+import { loadTestDbConfig } from './config';
+import { loadRootEnvFile } from './env-file';
 import { runMigrations } from './migrate';
 
 /**
