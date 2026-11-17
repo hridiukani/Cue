@@ -1,4 +1,5 @@
 import type { PlaybookInput } from '@cue/shared';
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createPlaybook,
@@ -7,6 +8,7 @@ import {
   listPlaybooks,
   updatePlaybook,
 } from '../src/repositories/playbooks';
+import { playbooks } from '../src/schema';
 import { connectTestDb, makeCall, makeUser } from './helpers';
 
 const { db, close } = connectTestDb();
@@ -82,10 +84,18 @@ describe('playbook repository edge cases', () => {
     const user = (await makeUser(db)).id;
     const first = await createPlaybook(db, user, input('First'));
     await createPlaybook(db, user, input('Second'));
-    const before = (await getPlaybook(db, user, first))?.updatedAt;
+    // Compare in Postgres at microsecond precision: JS Dates only keep
+    // milliseconds, and an edit can land within the same millisecond.
+    const updatedAtMicros = async () => {
+      const [row] = await db.execute<{ us: string }>(
+        sql`select (extract(epoch from ${playbooks.updatedAt}) * 1000000)::bigint::text as us
+            from ${playbooks} where ${playbooks.id} = ${first}`,
+      );
+      return BigInt(row?.us ?? '0');
+    };
+    const before = await updatedAtMicros();
     await updatePlaybook(db, user, first, input('First, edited'));
-    const after = (await getPlaybook(db, user, first))?.updatedAt;
-    expect(after?.getTime()).toBeGreaterThan(before?.getTime() ?? Infinity);
+    expect(await updatedAtMicros()).toBeGreaterThan(before);
     expect((await listPlaybooks(db, user))[0]).toMatchObject({ id: first, objectionCount: 1 });
   });
 });

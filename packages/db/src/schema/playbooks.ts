@@ -21,10 +21,12 @@ export const playbooks = pgTable(
       .default(sql`'[]'::jsonb`),
     toneNotes: text('tone_notes'),
     createdAt: createdAt(),
+    // Both insert and update use the database clock (now()). Mixing in the app
+    // server's clock (new Date()) made updated_at go backwards under clock skew.
     updatedAt: timestamptz('updated_at')
       .notNull()
       .defaultNow()
-      .$onUpdate(() => new Date()),
+      .$onUpdate(() => sql`now()`),
   },
   (t) => [index('playbooks_user_id_idx').on(t.userId)],
 );
