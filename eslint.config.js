@@ -1,6 +1,8 @@
 // @ts-check
 import js from '@eslint/js';
+import nextPlugin from '@next/eslint-plugin-next';
 import { defineConfig } from 'eslint/config';
+import reactHooks from 'eslint-plugin-react-hooks';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -49,6 +51,11 @@ export default defineConfig(
     // The one place each workspace is allowed to touch process.env.
     files: ['**/src/config.ts', '**/drizzle.config.ts'],
     rules: { 'no-restricted-properties': 'off' },
+  },
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    extends: [nextPlugin.configs['core-web-vitals'], reactHooks.configs.flat['recommended-latest']],
+    settings: { next: { rootDir: 'apps/web' } },
   },
   {
     files: ['**/*.js', '**/*.mjs'],
