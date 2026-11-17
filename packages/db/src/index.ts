@@ -10,3 +10,14 @@ export {
   getSessionUser,
   type OAuthIdentity,
 } from './repositories/users';
+export { getPgError, PG_ERROR, type PgErrorInfo } from './errors';
+export {
+  createPlaybook,
+  deletePlaybook,
+  getPlaybook,
+  listPlaybooks,
+  updatePlaybook,
+  type DeletePlaybookResult,
+  type PlaybookListItem,
+} from './repositories/playbooks';
+export type { Playbook } from './schema';
