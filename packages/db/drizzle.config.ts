@@ -1,12 +1,8 @@
 import { defineConfig } from 'drizzle-kit';
-import { loadDbConfig } from './src/config';
+import { loadDbConfig, loadRootEnvFile } from './src/config';
 
 // drizzle-kit is run by hand, so pick up the repo-root .env if there is one.
-try {
-  process.loadEnvFile('../../.env');
-} catch {
-  // No .env file: fall back to the real environment.
-}
+loadRootEnvFile();
 
 export default defineConfig({
   dialect: 'postgresql',
