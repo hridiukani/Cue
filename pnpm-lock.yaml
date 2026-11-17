@@ -27,7 +27,7 @@ importers:
         specifier: ^3.10.1
         version: 3.10.1
       typescript:
-        specifier: 6.0.3
+        specifier: ~6.0.3
         version: 6.0.3
       typescript-eslint:
         specifier: ^8.73.0
@@ -35,6 +35,12 @@ importers:
       vitest:
         specifier: ^4.1.12
         version: 4.1.12(@types/node@20.19.43)(vite@8.3.8(@types/node@20.19.43))
+
+  packages/shared:
+    dependencies:
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
 packages:
 
@@ -894,6 +900,9 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
 snapshots:
 
   '@cacheable/memory@2.2.0':
@@ -1648,3 +1657,5 @@ snapshots:
   word-wrap@1.2.5: {}
 
   yocto-queue@0.1.0: {}
+
+  zod@4.6.7: {}
