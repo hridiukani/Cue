@@ -16,7 +16,8 @@
     "db:generate": "pnpm --filter @cue/db db:generate",
     "db:migrate": "pnpm --filter @cue/db db:migrate",
     "db:seed": "pnpm --filter @cue/db db:seed",
-    "db:studio": "pnpm --filter @cue/db db:studio"
+    "db:studio": "pnpm --filter @cue/db db:studio",
+    "ingest": "pnpm --filter @cue/ingest ingest"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

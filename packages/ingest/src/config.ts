@@ -3,10 +3,16 @@ import { fileURLToPath } from 'node:url';
 import { loadDbConfig } from '@cue/db';
 import { z } from 'zod';
 
+// An empty value (e.g. 'HF_TOKEN=' copied from .env.example) means "not set".
+const optionalString = z
+  .string()
+  .optional()
+  .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim()));
+
 const EnvSchema = z.object({
   // Optional: only needed for gated or private datasets.
-  HF_TOKEN: z.string().min(1).optional(),
-  BLOB_STORE_DIR: z.string().min(1).optional(),
+  HF_TOKEN: optionalString,
+  BLOB_STORE_DIR: optionalString,
 });
 
 export interface IngestConfig {

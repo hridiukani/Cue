@@ -26,3 +26,10 @@ Thumbs.db
 .idea/
 
 *.log
+
+# datasets and imported audio (never commit; see docs/datasets.md)
+data/
+*.wav
+*.pcm
+*.mp3
+*.flac
