@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cue}
       POSTGRES_DB: ${POSTGRES_DB:-cue}
     ports:
-      - '${POSTGRES_PORT:-5432}:5432'
+      - '${POSTGRES_PORT:-5434}:5432'
     volumes:
       - cue-pgdata:/var/lib/postgresql/data
     healthcheck:
