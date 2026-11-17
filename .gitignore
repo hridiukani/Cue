@@ -1,0 +1,28 @@
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# env (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# test / tooling
+coverage/
+.turbo/
+.eslintcache
+
+# os / editors
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+*.log
