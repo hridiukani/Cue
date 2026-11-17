@@ -22,3 +22,30 @@ export {
   type PlaybookListItem,
 } from './repositories/playbooks';
 export type { Playbook } from './schema';
+export {
+  getRecording,
+  getRecordingUtterances,
+  listDatasets,
+  listRecordings,
+  upsertDataset,
+  upsertRecording,
+  upsertRecordingAudio,
+  type DatasetInput,
+  type RecordingAudioInput,
+  type RecordingDetail,
+  type RecordingFilters,
+  type RecordingInput,
+  type RecordingListItem,
+} from './repositories/recordings';
+export {
+  appendSessionUtterance,
+  createReplaySession,
+  endIdleSessions,
+  endSession,
+  getSession,
+  listSessionUtterances,
+  updateSessionPosition,
+  type SessionUtterance,
+  type SessionUtteranceInput,
+} from './repositories/sessions';
+export type { Call, Dataset, Recording } from './schema';

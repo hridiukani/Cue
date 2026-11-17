@@ -15,7 +15,11 @@ describe('migrations', () => {
       'auth_accounts',
       'call_summaries',
       'calls',
+      'datasets',
       'playbooks',
+      'recording_audio',
+      'recording_utterances',
+      'recordings',
       'suggestion_feedback',
       'suggestions',
       'users',
@@ -27,10 +31,12 @@ describe('migrations', () => {
     const rows = await db.execute<{ typname: string }>(sql`
       select typname from pg_type where typtype = 'e' order by typname`);
     expect(rows.map((r) => r.typname)).toEqual([
+      'call_mode',
       'call_status',
       'feedback_signal',
       'speaker',
       'suggestion_status',
+      'timing',
     ]);
   });
 

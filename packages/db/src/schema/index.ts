@@ -1,6 +1,7 @@
 export * from './enums';
 export * from './users';
 export * from './playbooks';
+export * from './recordings';
 export * from './calls';
 export * from './utterances';
 export * from './suggestions';

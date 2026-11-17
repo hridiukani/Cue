@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { inject } from 'vitest';
 import { createDb } from '../src/client';
 import { getPgError, PG_ERROR, type PgErrorInfo } from '../src/errors';
+import { upsertDataset, upsertRecording } from '../src/repositories/recordings';
 import { calls, playbooks, suggestions, users, utterances } from '../src/schema';
 
 /** Connect to this run's throwaway database (created in global-setup.ts). */
@@ -80,4 +81,34 @@ export async function makeSuggestion(db: TestDb, callId: string, utteranceId: st
 function required<T>(row: T | undefined): T {
   if (row === undefined) throw new Error('insert returned no row');
   return row;
+}
+
+export async function makeRecording(
+  db: TestDb,
+  utteranceCount = 3,
+  datasetId = `test/dataset-${randomUUID()}`,
+) {
+  await upsertDataset(db, {
+    id: datasetId,
+    name: 'Test dataset',
+    url: 'https://example.test',
+    license: 'apache-2.0',
+    revision: null,
+  });
+  const recordingId = await upsertRecording(db, {
+    datasetId,
+    externalId: randomUUID(),
+    title: 'Test recording',
+    timing: 'real',
+    hasAudio: false,
+    language: 'en',
+    metadata: {},
+    utterances: Array.from({ length: utteranceCount }, (_, i) => ({
+      speaker: i % 2 === 0 ? ('rep' as const) : ('prospect' as const),
+      text: `Line ${String(i)}`,
+      startedMs: i * 1000,
+      endedMs: i * 1000 + 800,
+    })),
+  });
+  return { datasetId, recordingId };
 }

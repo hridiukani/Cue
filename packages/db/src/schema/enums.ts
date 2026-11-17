@@ -16,3 +16,9 @@ export const feedbackSignalEnum = pgEnum('feedback_signal', [
   'used',
   'ignored',
 ]);
+
+/** Whether a recording's utterance times are real or estimated from text length. */
+export const timingEnum = pgEnum('timing', ['real', 'estimated']);
+
+/** A call is either a live coaching session or a replay of an imported recording. */
+export const callModeEnum = pgEnum('call_mode', ['live', 'replay']);

@@ -15,6 +15,13 @@
       "when": 1794946576300,
       "tag": "0001_auth_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794952371956,
+      "tag": "0002_recordings_and_replay_sessions",
+      "breakpoints": true
     }
   ]
 }
