@@ -3,7 +3,13 @@ import { loadConfig } from './config';
 import { buildServer } from './server';
 
 describe('GET /health', () => {
-  const app = buildServer(loadConfig({ LOG_LEVEL: 'silent' }));
+  const app = buildServer(
+    loadConfig({
+      LOG_LEVEL: 'silent',
+      DATABASE_URL: 'postgres://cue:cue@localhost:5434/cue',
+      REALTIME_TICKET_SECRET: 's'.repeat(32),
+    }),
+  );
   afterAll(() => app.close());
 
   it('returns ok', async () => {

@@ -10,10 +10,15 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@cue/db": "workspace:*",
+    "@cue/shared": "workspace:*",
+    "@fastify/websocket": "^11.3.7",
     "fastify": "^5.12.8",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "tsx": "^4.23.15"
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "ws": "^8.23.0"
   }
 }
