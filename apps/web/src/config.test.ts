@@ -7,6 +7,7 @@ describe('parseServerConfig', () => {
     AUTH_SECRET: 'x'.repeat(32),
     AUTH_GITHUB_ID: 'gh-id',
     AUTH_GITHUB_SECRET: 'gh-secret',
+    REALTIME_TICKET_SECRET: 't'.repeat(32),
   };
 
   it('maps env vars to config', () => {
@@ -15,6 +16,7 @@ describe('parseServerConfig', () => {
       authSecret: env.AUTH_SECRET,
       githubClientId: 'gh-id',
       githubClientSecret: 'gh-secret',
+      realtimeTicketSecret: env.REALTIME_TICKET_SECRET,
     });
   });
 
@@ -24,7 +26,7 @@ describe('parseServerConfig', () => {
 
   it('names every missing variable', () => {
     expect(() => parseServerConfig({})).toThrow(
-      /DATABASE_URL[\s\S]*AUTH_SECRET[\s\S]*AUTH_GITHUB_ID/,
+      /DATABASE_URL[\s\S]*AUTH_SECRET[\s\S]*AUTH_GITHUB_ID[\s\S]*REALTIME_TICKET_SECRET/,
     );
   });
 });

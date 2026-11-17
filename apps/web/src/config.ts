@@ -41,6 +41,10 @@ const ServerEnvSchema = z.object({
   AUTH_SECRET: z.string().min(32, 'AUTH_SECRET must be at least 32 characters'),
   AUTH_GITHUB_ID: z.string().min(1, 'AUTH_GITHUB_ID is required (GitHub OAuth app client id)'),
   AUTH_GITHUB_SECRET: z.string().min(1, 'AUTH_GITHUB_SECRET is required'),
+  // Signs the short-lived tickets the browser uses to open the realtime WebSocket.
+  REALTIME_TICKET_SECRET: z
+    .string()
+    .min(32, 'REALTIME_TICKET_SECRET must be at least 32 characters'),
 });
 
 export interface ServerConfig {
@@ -48,6 +52,7 @@ export interface ServerConfig {
   authSecret: string;
   githubClientId: string;
   githubClientSecret: string;
+  realtimeTicketSecret: string;
 }
 
 export function parseServerConfig(env: Record<string, string | undefined>): ServerConfig {
@@ -61,6 +66,7 @@ export function parseServerConfig(env: Record<string, string | undefined>): Serv
     authSecret: e.AUTH_SECRET,
     githubClientId: e.AUTH_GITHUB_ID,
     githubClientSecret: e.AUTH_GITHUB_SECRET,
+    realtimeTicketSecret: e.REALTIME_TICKET_SECRET,
   };
 }
 
