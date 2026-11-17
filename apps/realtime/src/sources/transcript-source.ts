@@ -182,12 +182,10 @@ function buildTimeline(utterances: readonly TimedUtterance[], durationMs: number
     const words = u.text.split(/\s+/).filter(Boolean).length;
     const span = u.endedMs - u.startedMs;
     for (let t = u.startedMs; t < u.endedMs; t += INTERIM_STEP_MS) {
-      const shown = Math.max(
-        1,
-        Math.ceil(((t - u.startedMs + INTERIM_STEP_MS) / Math.max(span, 1)) * words),
-      );
-      if (shown >= words) break; // the final will carry the full text
-      events.push({ at: t, kind: 'interim', u, words: shown });
+      // Words "heard so far" at time t (at least one, like real STT as speech starts).
+      const shown = Math.max(1, Math.ceil(((t - u.startedMs) / Math.max(span, 1)) * words));
+      if (shown >= words && t > u.startedMs) break; // the final will carry the full text
+      events.push({ at: t, kind: 'interim', u, words: Math.min(shown, words) });
     }
     events.push({ at: u.endedMs, kind: 'final', u });
   }
