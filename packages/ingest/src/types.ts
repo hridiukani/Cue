@@ -23,8 +23,10 @@ export interface Logger {
 export interface AdapterContext {
   hf: HfClient;
   revision: string;
-  /** Max recordings to yield (null = adapter default / no limit). */
+  /** Max recordings to yield (null = no limit). */
   limit: number | null;
+  /** Max source rows to scan when an adapter has to filter locally. */
+  maxScan: number;
   log: Logger;
 }
 
