@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CoachingNotesSchema,
+  RecordingMetadataSchema,
   NextStepsSchema,
   PlaybookObjectionsSchema,
   RaisedObjectionsSchema,
@@ -55,5 +56,37 @@ describe('CoachingNotesSchema', () => {
   it('requires utterance_id to be a uuid when present', () => {
     expect(CoachingNotesSchema.safeParse([{ note: 'Good discovery question' }]).success).toBe(true);
     expect(CoachingNotesSchema.safeParse([{ note: 'x', utterance_id: 'abc' }]).success).toBe(false);
+  });
+});
+
+describe('RecordingMetadataSchema', () => {
+  it('accepts small flat metadata', () => {
+    expect(
+      RecordingMetadataSchema.safeParse({ product_type: 'SaaS', outcome: 1, converted: true })
+        .success,
+    ).toBe(true);
+  });
+
+  it.each([
+    'seller_age_range',
+    'partner_gender',
+    'seller_ethnicity',
+    'partner_grew_up_in',
+    'Race',
+    'sellerGrewUpIn',
+    'partnerAgeRange',
+  ])('refuses the demographic key %s', (key) => {
+    expect(RecordingMetadataSchema.safeParse({ [key]: 'x' }).success).toBe(false);
+  });
+
+  it.each(['language', 'stage', 'message_count', 'page', 'usage_tier', 'grewth'])(
+    'allows the ordinary key %s',
+    (key) => {
+      expect(RecordingMetadataSchema.safeParse({ [key]: 'x' }).success).toBe(true);
+    },
+  );
+
+  it('refuses nested objects', () => {
+    expect(RecordingMetadataSchema.safeParse({ scenario: { persona: 'x' } }).success).toBe(false);
   });
 });

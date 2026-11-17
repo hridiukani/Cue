@@ -46,3 +46,45 @@ export const CoachingNoteSchema = z
   .strict();
 export const CoachingNotesSchema = z.array(CoachingNoteSchema);
 export type CoachingNote = z.infer<typeof CoachingNoteSchema>;
+
+/**
+ * recordings.metadata: small, flat, allowlisted facts about an imported
+ * recording (e.g. product type, outcome). Never personal or demographic data.
+ * Each ingest adapter picks fields from an explicit allowlist; this schema is
+ * a second line of defense that refuses demographic-looking keys outright.
+ */
+const DEMOGRAPHIC_WORDS = new Set([
+  'age',
+  'gender',
+  'sex',
+  'ethnicity',
+  'ethnic',
+  'race',
+  'nationality',
+  'religion',
+  'demographic',
+  'demographics',
+]);
+
+/** Whole-word match on a key split at _ - . and camelCase, so "language" is fine but "seller_age_range" is not. */
+export function isDemographicKey(key: string): boolean {
+  const words = key
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (words.some((w) => DEMOGRAPHIC_WORDS.has(w))) return true;
+  // "grew_up_in" / "grewUpIn": where someone is from.
+  return words.some((w, i) => w === 'grew' && words[i + 1] === 'up');
+}
+
+export const RecordingMetadataSchema = z
+  .record(
+    z.string().min(1).max(64),
+    z.union([z.string().max(500), z.number(), z.boolean(), z.null()]),
+  )
+  .refine((m) => Object.keys(m).length <= 20, 'At most 20 metadata fields')
+  .refine((m) => !Object.keys(m).some(isDemographicKey), {
+    message: 'Demographic fields must not be stored in recording metadata',
+  });
+export type RecordingMetadata = z.infer<typeof RecordingMetadataSchema>;
