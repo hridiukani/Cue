@@ -123,6 +123,25 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/ingest:
+    dependencies:
+      '@cue/db':
+        specifier: workspace:*
+        version: link:../db
+      '@cue/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@cue/storage':
+        specifier: workspace:*
+        version: link:../storage
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
+    devDependencies:
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
   packages/shared:
     dependencies:
       zod:
