@@ -5,3 +5,4 @@ export * from './calls';
 export * from './utterances';
 export * from './suggestions';
 export * from './feedback';
+export * from './call-summaries';
