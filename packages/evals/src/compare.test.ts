@@ -54,6 +54,29 @@ describe('compareRuns', () => {
     expect(r.regressions).toBe(0);
   });
 
+  it('does not compare a case where either run had a model or judge error', () => {
+    const ungraded = fakeCase('a', 1, 3);
+    const first = ungraded.runs[1];
+    if (first) Object.assign(first, { judgeError: 'judge HTTP 429', score: null, pass: false });
+    const r = cmp(fakeRunFile([fakeCase('a', 3, 3)]), fakeRunFile([ungraded]));
+    expect(statusOf(r, 'a')).toBe('errored');
+    expect(r.regressions).toBe(0);
+  });
+
+  it('flags identical settings, where every difference is noise', () => {
+    const same = cmp(fakeRunFile([fakeCase('a', 3, 3)]), fakeRunFile([fakeCase('a', 2, 3)]));
+    expect(same.sameSettings).toBe(true);
+    expect(formatCompare(same)).toMatch(
+      /run-to-run noise\. With N=3, one flipped run moves a case by 33 points/,
+    );
+    const changed = cmp(
+      fakeRunFile([fakeCase('a', 3, 3)]),
+      fakeRunFile([fakeCase('a', 3, 3)], { promptVersion: 'suggest-v2' }),
+    );
+    expect(changed.sameSettings).toBe(false);
+    expect(formatCompare(changed)).not.toMatch(/run-to-run noise/);
+  });
+
   it('lists cases present in only one run', () => {
     const r = cmp(
       fakeRunFile([fakeCase('a', 3, 3), fakeCase('b', 3, 3)]),

@@ -21,7 +21,7 @@ export const REGRESSION_SCORE_DROP = 0.5;
 export const OVERALL_PASS_DROP = 0.05;
 
 export type CaseDiffStatus =
-  'regressed' | 'improved' | 'unchanged' | 'rubric_changed' | 'only_in_a' | 'only_in_b';
+  'regressed' | 'improved' | 'unchanged' | 'rubric_changed' | 'errored' | 'only_in_a' | 'only_in_b';
 
 export interface CaseDiff {
   id: string;
@@ -43,6 +43,11 @@ export interface CompareResult {
   a: { file: string; meta: RunFile['meta'] };
   b: { file: string; meta: RunFile['meta'] };
   settingsChanged: string[];
+  /**
+   * Same model, prompt, judge, N and cases: every difference is run-to-run
+   * noise, which with small N is large (one flipped run = 1/N).
+   */
+  sameSettings: boolean;
   metrics: {
     passRate: MetricDiff;
     meanScore: MetricDiff;
@@ -74,6 +79,11 @@ function settingsChanged(a: RunFile['meta'], b: RunFile['meta']): string[] {
   check('runs per case', a.runsPerCase, b.runsPerCase);
   if (a.casesFile.sha256 !== b.casesFile.sha256) out.push('cases file changed');
   return out;
+}
+
+/** Runs of this case where the model or the judge failed (not a quality signal). */
+function erroredRuns(c: RunFile['cases'][number]): number {
+  return c.runs.filter((r) => r.error !== null || r.judgeError !== null).length;
 }
 
 export function compareRuns(
@@ -109,6 +119,10 @@ export function compareRuns(
     if (x.rubricHash !== y.rubricHash) {
       return { ...base, status: 'rubric_changed', passRateDelta, scoreDelta };
     }
+    // A run that errored (model or judge) says nothing about quality: don't compare it.
+    if (erroredRuns(x) > 0 || erroredRuns(y) > 0) {
+      return { ...base, status: 'errored', passRateDelta, scoreDelta };
+    }
     const eps = 1e-9; // 2/3 - 1 must count as a full 1/3 drop
     const regressed =
       passRateDelta <= -REGRESSION_PASS_DROP + eps ||
@@ -124,13 +138,15 @@ export function compareRuns(
     };
   });
 
+  const changed = settingsChanged(a.run.meta, b.run.meta);
   const sa = a.run.summary;
   const sb = b.run.summary;
   const passRate = diff(sa.passRate, sb.passRate);
   return {
     a: { file: a.file, meta: a.run.meta },
     b: { file: b.file, meta: b.run.meta },
-    settingsChanged: settingsChanged(a.run.meta, b.run.meta),
+    settingsChanged: changed,
+    sameSettings: changed.length === 0,
     metrics: {
       passRate,
       meanScore: diff(sa.meanScore, sb.meanScore),

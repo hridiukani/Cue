@@ -163,6 +163,13 @@ export function formatCompare(r: CompareResult, style: Style = PLAIN): string {
   if (r.settingsChanged.length > 0) {
     lines.push(style.yellow(`Settings changed: ${r.settingsChanged.join('; ')}`));
   }
+  if (r.sameSettings) {
+    lines.push(
+      style.yellow(
+        `Same model, prompt, judge, N and cases: every difference below is run-to-run noise. With N=${String(r.a.meta.runsPerCase)}, one flipped run moves a case by ${String(Math.round(100 / r.a.meta.runsPerCase))} points; use --runs 5 or more before trusting a regression.`,
+      ),
+    );
+  }
   lines.push('');
   const m = r.metrics;
   // For pass rate and score, up is good; for latency and cost, down is good.
@@ -239,11 +246,12 @@ export function formatCompare(r: CompareResult, style: Style = PLAIN): string {
       regressed: style.red('REGRESSED'),
       improved: style.green('improved'),
       rubric_changed: style.yellow('rubric changed (not compared)'),
+      errored: style.yellow('had errors (not compared)'),
       only_in_a: style.dim('only in A'),
       only_in_b: style.dim('only in B'),
       unchanged: '',
     };
-    const order = ['regressed', 'rubric_changed', 'improved', 'only_in_a', 'only_in_b'];
+    const order = ['regressed', 'rubric_changed', 'errored', 'improved', 'only_in_a', 'only_in_b'];
     lines.push(
       table([
         ['Case', 'Category', 'Pass A → B', 'Score A → B', 'Status'],
