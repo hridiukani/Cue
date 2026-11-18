@@ -36,7 +36,9 @@ export class TranscriptSource implements CallSource {
   private readonly events: TimelineEvent[];
   private readonly listeners = new Set<(e: SourceEvent) => void>();
   private cursor = 0; // index of the next event to emit
+  /** Timeline position at clock time `positionAt`; while playing it keeps advancing from there. */
   private position = 0;
+  private positionAt = 0;
   private currentSpeed: Speed = '1x';
   private isPlaying = false;
   private closed = false;
@@ -53,8 +55,27 @@ export class TranscriptSource implements CallSource {
     this.events = buildTimeline(sorted, this.durationMs);
   }
 
+  /**
+   * Where the timeline is now: the last event's time plus the time played
+   * since, at the current speed (never past the next event, which hasn't fired).
+   */
   get positionMs(): number {
-    return this.position;
+    if (!this.isPlaying || this.currentSpeed === 'instant' || this.timer === null) {
+      return this.position;
+    }
+    const elapsed = (this.clock.now() - this.positionAt) * SPEED_FACTOR[this.currentSpeed];
+    const next = this.events[this.cursor]?.at ?? this.durationMs;
+    return Math.min(this.position + Math.max(0, elapsed), next);
+  }
+
+  /**
+   * Fold the time played since the last event into `position`. Call before
+   * anything that reschedules (pause, speed change): otherwise that time is
+   * lost and the transcript falls further behind the recording on every change.
+   */
+  private settlePosition(): void {
+    this.position = this.positionMs;
+    this.positionAt = this.clock.now();
   }
   get speed(): Speed {
     return this.currentSpeed;
@@ -76,6 +97,7 @@ export class TranscriptSource implements CallSource {
   }
 
   pause(): void {
+    this.settlePosition();
     this.isPlaying = false;
     this.cancelTimer();
   }
@@ -83,6 +105,7 @@ export class TranscriptSource implements CallSource {
   resume(): void {
     if (this.closed || this.isPlaying) return;
     this.isPlaying = true;
+    this.positionAt = this.clock.now(); // paused time doesn't count
     this.scheduleNext();
   }
 
@@ -94,6 +117,7 @@ export class TranscriptSource implements CallSource {
   }
 
   setSpeed(speed: Speed): void {
+    this.settlePosition(); // measured at the old speed
     this.currentSpeed = speed;
     this.cancelTimer();
     if (this.isPlaying) this.scheduleNext();
@@ -110,6 +134,7 @@ export class TranscriptSource implements CallSource {
   private jumpTo(ms: number): void {
     const target = Math.max(0, Math.min(ms, this.durationMs));
     this.position = target;
+    this.positionAt = this.clock.now();
     this.cursor = this.events.findIndex((e) => e.at >= target);
     if (this.cursor === -1) this.cursor = this.events.length;
   }
@@ -139,16 +164,26 @@ export class TranscriptSource implements CallSource {
       this.emit({ type: 'ended' });
       return;
     }
-    const delay = instant ? 0 : (next.at - this.position) / SPEED_FACTOR[this.currentSpeed];
+    // Due relative to when the previous event was DUE, not when its timer
+    // actually ran: timers fire a few ms late, and chaining from the real fire
+    // time would add that lateness up (about 0.8 s per 17 s at 2x, measured).
+    const now = this.clock.now();
+    const dueAt = instant
+      ? now
+      : this.positionAt + (next.at - this.position) / SPEED_FACTOR[this.currentSpeed];
     const generation = this.generation;
-    this.timer = this.clock.setTimeout(() => {
-      if (generation !== this.generation) return; // stale: a seek/pause happened
-      this.timer = null;
-      this.cursor++;
-      this.position = next.at;
-      this.fire(next);
-      this.scheduleNext();
-    }, delay);
+    this.timer = this.clock.setTimeout(
+      () => {
+        if (generation !== this.generation) return; // stale: a seek/pause happened
+        this.timer = null;
+        this.cursor++;
+        this.position = next.at;
+        this.positionAt = dueAt;
+        this.fire(next);
+        this.scheduleNext();
+      },
+      Math.max(0, dueAt - now),
+    );
   }
 
   private fire(e: TimelineEvent): void {

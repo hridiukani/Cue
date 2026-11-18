@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FakeClock } from '../clock';
+import { type Clock, FakeClock } from '../clock';
 import type { SourceEvent } from './call-source';
 import { type TimedUtterance, TranscriptSource } from './transcript-source';
 
@@ -80,13 +80,61 @@ describe('TranscriptSource', () => {
     source.pause();
     clock.advance(60_000);
     expect(finals()).toHaveLength(1);
-    expect(source.positionMs).toBe(1500);
+    expect(source.positionMs).toBe(1600); // where it was paused, not the last event (1500)
 
     source.resume();
-    clock.advance(1400); // 1500 → 2900: not yet
+    clock.advance(1399); // 1600 → 2999: not yet
     expect(finals()).toHaveLength(1);
-    clock.advance(100);
+    clock.advance(1); // 3000: the next final, with no time lost to the pause
     expect(finals()).toHaveLength(2);
+  });
+
+  it('reports the live position between events, never past the next one', () => {
+    const { clock, source } = setup();
+    source.start(0, '1x');
+    clock.advance(1700); // last event at 1600 (an interim/tick), next at 2000
+    expect(source.positionMs).toBe(1700);
+    source.setSpeed('2x');
+    clock.advance(100);
+    expect(source.positionMs).toBe(1900);
+  });
+
+  it('a speed change between events keeps the time already played', () => {
+    const { clock, source, finals } = setup();
+    source.start(0, '1x');
+    clock.advance(2700); // timeline 2700, mid-utterance 1 (ends at 3000)
+    source.setSpeed('2x');
+    clock.advance(149); // 300 ms of timeline left at 2x = 150 ms
+    expect(finals()).toHaveLength(1);
+    clock.advance(1);
+    expect(finals().map((e) => [e.key, e.wallMs])).toEqual([
+      ['u-0', 1500],
+      ['u-1', 2850],
+    ]);
+  });
+
+  it('does not fall behind the recording however often the speed changes', () => {
+    // One long utterance, like real-sales: events every 300 ms, switches in between.
+    const words = Array.from({ length: 200 }, (_, i) => `w${String(i)}`).join(' ');
+    const { clock, source, finals } = setup([
+      { idx: 0, speaker: 'prospect', text: words, startedMs: 0, endedMs: 120_000 },
+    ]);
+    source.start(0, '1x');
+    let ideal = 0; // a stopwatch for the timeline
+    let rate = 1;
+    for (let i = 0; i < 20; i++) {
+      clock.advance(1234);
+      ideal += 1234 * rate;
+      rate = rate === 1 ? 2 : 1;
+      source.setSpeed(rate === 2 ? '2x' : '1x');
+    }
+    expect(source.positionMs).toBe(ideal); // nothing lost over 20 switches
+    // And the final arrives exactly when the stopwatch says it should.
+    const wallLeft = (120_000 - ideal) / rate;
+    clock.advance(wallLeft - 1);
+    expect(finals()).toHaveLength(0);
+    clock.advance(1);
+    expect(finals()).toHaveLength(1);
   });
 
   it('seek forward skips earlier utterances; stale timers never fire', () => {
@@ -112,6 +160,33 @@ describe('TranscriptSource', () => {
     source.setSpeed('2x');
     clock.advance(750); // 1500 + 1500/2 = 3000 timeline
     expect(finals()).toHaveLength(2);
+  });
+
+  it('late timers do not add up: the timeline stays on the wall clock', () => {
+    // Like a real event loop: every timer fires 5 ms after it was due.
+    const fake = new FakeClock();
+    const late: Clock = {
+      now: () => fake.now(),
+      setTimeout: (fn, ms) => fake.setTimeout(fn, ms + 5),
+      clearTimeout: (h) => {
+        fake.clearTimeout(h);
+      },
+    };
+    const words = Array.from({ length: 200 }, (_, i) => `w${String(i)}`).join(' ');
+    const source = new TranscriptSource(
+      [{ idx: 0, speaker: 'prospect', text: words, startedMs: 0, endedMs: 60_000 }],
+      late,
+    );
+    const finalsAt: number[] = [];
+    source.on((e) => {
+      if (e.type === 'final') finalsAt.push(fake.now());
+    });
+    source.start(0, '2x');
+    fake.advance(40_000);
+    // Due at 30 000 ms (60 s of timeline at 2x): ~300 events in between, each 5 ms late,
+    // would have pushed it ~1.5 s back. Now it's only as late as one timer.
+    expect(finalsAt).toHaveLength(1);
+    expect(finalsAt[0]).toBeLessThanOrEqual(30_005);
   });
 
   it('close stops everything and leaves no timers behind', async () => {
