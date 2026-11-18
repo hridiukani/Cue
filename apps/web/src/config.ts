@@ -45,6 +45,11 @@ const ServerEnvSchema = z.object({
   REALTIME_TICKET_SECRET: z
     .string()
     .min(32, 'REALTIME_TICKET_SECRET must be at least 32 characters'),
+  // Where `pnpm ingest --with-audio` stored recordings' audio. Empty = the default.
+  BLOB_STORE_DIR: z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim())),
 });
 
 export interface ServerConfig {
@@ -53,6 +58,8 @@ export interface ServerConfig {
   githubClientId: string;
   githubClientSecret: string;
   realtimeTicketSecret: string;
+  /** Unset means the repo's ./data/blobs (resolved in server/blobs.ts, not here: this file is also client code). */
+  blobStoreDir: string | undefined;
 }
 
 export function parseServerConfig(env: Record<string, string | undefined>): ServerConfig {
@@ -67,6 +74,7 @@ export function parseServerConfig(env: Record<string, string | undefined>): Serv
     githubClientId: e.AUTH_GITHUB_ID,
     githubClientSecret: e.AUTH_GITHUB_SECRET,
     realtimeTicketSecret: e.REALTIME_TICKET_SECRET,
+    blobStoreDir: e.BLOB_STORE_DIR,
   };
 }
 

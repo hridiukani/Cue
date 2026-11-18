@@ -12,7 +12,7 @@ try {
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Workspace packages ship TypeScript source; let Next compile them.
-  transpilePackages: ['@cue/db', '@cue/shared'],
+  transpilePackages: ['@cue/db', '@cue/shared', '@cue/storage'],
 };
 
 export default nextConfig;

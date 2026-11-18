@@ -17,7 +17,15 @@ describe('parseServerConfig', () => {
       githubClientId: 'gh-id',
       githubClientSecret: 'gh-secret',
       realtimeTicketSecret: env.REALTIME_TICKET_SECRET,
+      blobStoreDir: undefined,
     });
+  });
+
+  it('reads BLOB_STORE_DIR, treating an empty value as unset', () => {
+    expect(parseServerConfig({ ...env, BLOB_STORE_DIR: ' /srv/blobs ' }).blobStoreDir).toBe(
+      '/srv/blobs',
+    );
+    expect(parseServerConfig({ ...env, BLOB_STORE_DIR: '' }).blobStoreDir).toBeUndefined();
   });
 
   it('rejects a short AUTH_SECRET', () => {
