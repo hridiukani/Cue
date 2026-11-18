@@ -24,6 +24,7 @@ export {
 export type { Playbook } from './schema';
 export {
   getRecording,
+  getRecordingAudio,
   getRecordingUtterances,
   listDatasets,
   listRecordings,
@@ -31,6 +32,7 @@ export {
   upsertRecording,
   upsertRecordingAudio,
   type DatasetInput,
+  type RecordingAudioInfo,
   type RecordingAudioInput,
   type RecordingDetail,
   type RecordingFilters,

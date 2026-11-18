@@ -109,6 +109,35 @@ export async function getRecordingUtterances(db: Db, recordingId: string) {
     .orderBy(asc(recordingUtterances.idx));
 }
 
+export interface RecordingAudioInfo {
+  storageKey: string;
+  contentType: string;
+  bytes: number;
+  durationMs: number | null;
+}
+
+/**
+ * Where a recording's original audio is stored, or null if it was never
+ * downloaded (`has_audio` can be true without it: ingest without --with-audio).
+ * Shared library, like getRecording: the caller must have checked sign-in.
+ */
+export async function getRecordingAudio(
+  db: Db,
+  recordingId: string,
+): Promise<RecordingAudioInfo | null> {
+  if (!z.uuid().safeParse(recordingId).success) return null;
+  const [row] = await db
+    .select({
+      storageKey: recordingAudio.storageKey,
+      contentType: recordingAudio.contentType,
+      bytes: recordingAudio.bytes,
+      durationMs: recordingAudio.durationMs,
+    })
+    .from(recordingAudio)
+    .where(eq(recordingAudio.recordingId, recordingId));
+  return row ?? null;
+}
+
 // ------------------------------------------------------------------ ingest writes
 
 export interface DatasetInput {

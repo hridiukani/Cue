@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
   getRecording,
+  getRecordingAudio,
   getRecordingUtterances,
   listRecordings,
   upsertDataset,
@@ -91,6 +92,19 @@ describe('upsertRecording', () => {
       sha256: 'f'.repeat(64),
     });
     expect((await getRecording(db, recordingId))?.hasAudio).toBe(true);
+    expect(await getRecordingAudio(db, recordingId)).toEqual({
+      storageKey: `audio/${recordingId}.wav`,
+      contentType: 'audio/wav',
+      bytes: 1234,
+      durationMs: 1000,
+    });
+  });
+
+  it('has no audio info for a transcript-only recording, an unknown id or a non-uuid', async () => {
+    const { recordingId } = await makeRecording(db, 1);
+    expect(await getRecordingAudio(db, recordingId)).toBeNull();
+    expect(await getRecordingAudio(db, randomUUID())).toBeNull();
+    expect(await getRecordingAudio(db, '../etc/passwd')).toBeNull();
   });
 });
 
