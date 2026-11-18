@@ -50,6 +50,17 @@ export interface RunnerOptions {
 
 const DEFAULT_MAX_RETRIES = 8;
 
+/**
+ * How long to wait before retry number `attempt` (0-based): the provider's
+ * retry-after, but at least an exponential backoff (2 s, 4 s, 8 s … capped at
+ * 60 s). Groq's retry-after is often a few seconds while two judge workers
+ * keep competing for the same per-minute token budget; in the first full run
+ * 8 short waits ran out for 28 of 129 judge calls.
+ */
+export function backoffMs(attempt: number, providerWaitMs: number): number {
+  return Math.min(60_000, Math.max(providerWaitMs, 2000 * 2 ** attempt));
+}
+
 /** At most `size` holders at once; the rest wait in order. */
 export class Semaphore {
   private active = 0;
@@ -135,7 +146,7 @@ async function generate(
     } catch (err) {
       const wait = retryDelay(err);
       if (wait !== null && attempt < maxRetries) {
-        const ms = Math.min(wait, 60_000);
+        const ms = backoffMs(attempt, wait);
         deps.onRateLimited?.('model', ms);
         await deps.sleep(ms);
         continue;
@@ -189,7 +200,7 @@ async function judge(
       lastError = err instanceof Error ? err.message : String(err);
       const wait = retryDelay(err);
       if (wait === null || attempt === maxRetries) break;
-      const ms = Math.min(wait, 60_000);
+      const ms = backoffMs(attempt, wait);
       deps.onRateLimited?.('judge', ms);
       await deps.sleep(ms);
     }

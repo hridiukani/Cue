@@ -10,7 +10,7 @@ import { parseCases } from './cases';
 import type { JudgeClient } from './judge';
 import { JudgeHttpError, STANDARD_MUST_NOT } from './judge';
 import type { ResolvedCase } from './resolve';
-import { FIRST_TOKEN_DEADLINE_MS, runCases, type RunnerDeps, Semaphore } from './runner';
+import { backoffMs, FIRST_TOKEN_DEADLINE_MS, runCases, type RunnerDeps, Semaphore } from './runner';
 
 /** Fake time: the fake model moves it forward as it "streams". */
 class Clock {
@@ -367,5 +367,15 @@ describe('Semaphore', () => {
     const sem = new Semaphore(1);
     await expect(sem.run(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
     await expect(sem.run(() => Promise.resolve(42))).resolves.toBe(42);
+  });
+});
+
+describe('backoffMs', () => {
+  it('waits at least an exponential backoff, longer if the provider asks, capped at 60 s', () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((a) => backoffMs(a, 1000))).toEqual([
+      2000, 4000, 8000, 16000, 32000, 60000, 60000,
+    ]);
+    expect(backoffMs(0, 7000)).toBe(7000); // the provider's retry-after wins when longer
+    expect(backoffMs(1, 120_000)).toBe(60_000);
   });
 });
