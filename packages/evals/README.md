@@ -17,7 +17,7 @@ Each case runs N times, so you can see how much the results vary.
 ```sh
 pnpm eval                                   # all cases, 3 runs each, default model and prompt
 pnpm eval --model openai/gpt-oss-20b --prompt-version suggest-v1
-pnpm eval --smoke --runs 2                  # the small subset CI runs
+pnpm eval --smoke --runs 3                  # the small subset CI runs
 pnpm eval --category price_objection --runs 5
 pnpm eval compare previous latest           # diff two saved runs, regressions first
 pnpm eval candidates                        # propose new moments from your imported calls
@@ -114,7 +114,7 @@ Per-case license information is kept in each case's `source.license`. Current ca
 
 ## CI
 
-`.github/workflows/eval-smoke.yml` runs `pnpm eval --smoke --runs 2` on every pull request. That's 8 inline cases (Apache-2.0 only, so no database is needed), and the job fails if the pass rate is below the repository variable `EVAL_MIN_PASS_RATE`.
+`.github/workflows/eval-smoke.yml` runs `pnpm eval --smoke --runs 3` on every pull request. That's 8 inline cases (Apache-2.0 only, so no database is needed), and the job fails if the pass rate is below the repository variable `EVAL_MIN_PASS_RATE`.
 
 It needs the repository secret `GROQ_API_KEY`. Pull requests from forks don't get secrets, so for them the eval is skipped with a warning.
 

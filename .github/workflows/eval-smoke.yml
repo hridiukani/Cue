@@ -1,0 +1,70 @@
+# Runs the suggestion-quality smoke eval (packages/evals) on every pull request
+# and fails if the pass rate drops below the threshold.
+#
+# Needs the repository secret GROQ_API_KEY. Pull requests from forks don't get
+# secrets, so for them the eval is skipped with a warning (never run with
+# pull_request_target: that would hand the key to untrusted code).
+# The threshold is the repository variable EVAL_MIN_PASS_RATE (default below).
+#
+# Why the default is so low (0.04 = fail only if none of the 24 lines pass):
+# the current prompt (suggest-v1) passes ~20-33% of lines (baseline
+# 2026-11-18: 33.3% over 129 runs; smoke 18.8% over 16). With 24 samples, a
+# threshold of 0.10 would fail ~1 PR in 7 on noise alone; 0.04 has ~0.6% false
+# alarms and still catches a broken prompt or pipeline. Raise it as the prompt
+# improves.
+name: Suggestion eval (smoke)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-smoke-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25 # 24 judge calls, paced by the provider's tokens-per-minute limit
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MIN_PASS_RATE: ${{ vars.EVAL_MIN_PASS_RATE || '0.04' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate the eval cases
+        run: pnpm eval cases
+
+      - name: Skip (no API key)
+        if: env.GROQ_API_KEY == ''
+        run: echo "::warning::GROQ_API_KEY is not available to this workflow (e.g. a pull request from a fork), so the suggestion eval was skipped."
+
+      - name: Run the smoke eval
+        if: env.GROQ_API_KEY != ''
+        run: >
+          pnpm eval --smoke --runs 3
+          --min-pass-rate "$MIN_PASS_RATE"
+          --json "$GITHUB_WORKSPACE/eval-smoke.json"
+          --markdown "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the eval results
+        if: always() && env.GROQ_API_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-smoke
+          path: |
+            eval-smoke.json
+            packages/evals/results/
+          if-no-files-found: ignore
+          retention-days: 30
