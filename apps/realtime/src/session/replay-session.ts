@@ -242,8 +242,14 @@ export class ReplaySession {
     switch (e.type) {
       case 'interim': {
         const sink = this.sink;
-        // The rep talking over a suggestion makes it moot.
-        if (e.speaker === 'rep') this.engine?.onRepSpeaking();
+        // The rep taking the turn makes a suggestion moot; a short backchannel doesn't.
+        // Judge the words and speaking time so far (positionMs is this interim's time).
+        if (e.speaker === 'rep') {
+          this.engine?.onRepSpeaking({
+            text: e.text,
+            durationMs: Math.max(0, this.source.positionMs - e.startMs),
+          });
+        }
         if (sink && shouldSend('interim', sink.bufferedBytes())) {
           sink.send({
             type: 'interim',
@@ -342,7 +348,7 @@ export class ReplaySession {
       this.history.splice(0, this.history.length - HISTORY_KEEP);
     if (!this.engine) return;
     if (e.speaker === 'rep') {
-      this.engine.onRepSpeaking();
+      this.engine.onRepSpeaking({ text: e.text, durationMs: e.endMs - e.startMs });
     } else if (this.source.playing) {
       // Only while playing: a final drained after a pause shouldn't start a suggestion.
       this.engine.onProspectFinal({

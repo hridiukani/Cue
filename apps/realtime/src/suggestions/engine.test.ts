@@ -222,15 +222,65 @@ describe('SuggestionEngine', () => {
     ]);
   });
 
-  it('the rep talking over it cancels the suggestion', async () => {
-    prospect();
-    await flush();
-    engine.onRepSpeaking();
-    await flush();
-    expect(of('suggestionDropped')).toEqual([
-      expect.objectContaining({ reason: 'cancelled_rep_spoke' }),
-    ]);
-    expect(llm.requests[0]?.signal.aborted).toBe(true);
+  describe('rep speech: backchannels are ignored, real turns cancel', () => {
+    const cases: { name: string; text: string; durationMs: number; cancels: boolean }[] = [
+      { name: '4 words, short', text: 'yeah that makes sense', durationMs: 900, cancels: false },
+      { name: '5 words, short', text: 'yeah that makes sense so', durationMs: 900, cancels: true },
+      { name: '1 word, exactly 1.5 s', text: 'mmmmhmm', durationMs: 1500, cancels: false },
+      { name: '1 word, 1501 ms', text: 'mmmmhmm', durationMs: 1501, cancels: true },
+    ];
+    for (const c of cases) {
+      it(`${c.name}: ${c.cancels ? 'cancels' : 'keeps'} the suggestion`, async () => {
+        prospect();
+        await flush();
+        expect(engine.onRepSpeaking({ text: c.text, durationMs: c.durationMs })).toBe(c.cancels);
+        await flush();
+        if (c.cancels) {
+          expect(of('suggestionDropped')).toEqual([
+            expect.objectContaining({ reason: 'cancelled_rep_spoke' }),
+          ]);
+          expect(llm.requests[0]?.signal.aborted).toBe(true);
+        } else {
+          await run(1000);
+          expect(of('suggestionDropped')).toEqual([]);
+          expect(of('suggestionCompleted')).toHaveLength(1);
+        }
+      });
+    }
+
+    it('a growing interim cancels once it crosses a threshold', async () => {
+      prospect();
+      await flush();
+      expect(engine.onRepSpeaking({ text: 'well', durationMs: 0 })).toBe(false);
+      expect(engine.onRepSpeaking({ text: 'well I hear you', durationMs: 600 })).toBe(false);
+      expect(engine.onRepSpeaking({ text: 'well I hear you but', durationMs: 900 })).toBe(true);
+      await flush();
+      expect(of('suggestionDropped')).toEqual([
+        expect.objectContaining({ reason: 'cancelled_rep_spoke' }),
+      ]);
+    });
+
+    it('does nothing when no suggestion is in flight', () => {
+      expect(
+        engine.onRepSpeaking({ text: 'a long reply from the rep here', durationMs: 3000 }),
+      ).toBe(false);
+      expect(sent).toEqual([]);
+    });
+
+    it('takes custom thresholds', async () => {
+      engine = new SuggestionEngine({
+        llm,
+        clock,
+        store,
+        send: (b) => sent.push(b),
+        config: { ...DEFAULT_SUGGESTION_CONFIG, model: 'test-model' },
+        playbook: null,
+        backchannel: { maxWords: 1, maxMs: 200 },
+      });
+      prospect();
+      await flush();
+      expect(engine.onRepSpeaking({ text: 'mm hmm', durationMs: 100 })).toBe(true);
+    });
   });
 
   it('skips suggestions entirely at instant speed', async () => {

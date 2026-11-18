@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { ServerMessageBody, Speed, SuggestionFailureReason } from '@cue/shared';
 import type { Clock, TimerHandle } from '../clock';
+import {
+  type BackchannelThresholds,
+  type RepSpeech,
+  repSpeechCancelsSuggestion,
+} from './backchannel';
 import { LlmError, type LlmClient, type LlmRequest } from './llm';
 import {
   buildSuggestionMessages,
@@ -96,8 +101,9 @@ interface Flight {
  * Generates at most ONE suggestion at a time for one session.
  *
  * - Triggered by a saved prospect final, at 1x or 2x only (never at instant).
- * - A newer prospect final, the rep speaking, or the session stopping cancels
- *   the suggestion in flight.
+ * - A newer prospect final, substantial rep speech (> 4 words or > 1.5 s; short
+ *   backchannels don't count), or the session stopping cancels the suggestion
+ *   in flight.
  * - No first token within firstTokenTimeoutMs (1.5 s): dropped as failed. A
  *   429 drops it too and pauses suggestions for the provider's retry-after.
  *   Nothing is retried: a late suggestion is worse than none.
@@ -121,6 +127,8 @@ export class SuggestionEngine {
       send: (body: ServerMessageBody) => void;
       config: SuggestionConfig;
       playbook: PlaybookForPrompt | null;
+      /** When rep speech counts as taking the turn. Defaults: > 4 words or > 1.5 s. */
+      backchannel?: BackchannelThresholds;
       log?: { warn(obj: object, msg: string): void };
     },
   ) {}
@@ -146,9 +154,17 @@ export class SuggestionEngine {
     this.start(input);
   }
 
-  /** The rep is talking (interim or final): their own words make a suggestion moot. */
-  onRepSpeaking(): void {
+  /**
+   * The rep is talking (interim: words and time so far; final: the whole line).
+   * Substantial speech makes the suggestion moot and cancels it; a short
+   * backchannel ("mm-hmm", "right") doesn't (see ./backchannel.ts).
+   * Returns whether it cancelled.
+   */
+  onRepSpeaking(speech: RepSpeech): boolean {
+    if (!this.current) return false;
+    if (!repSpeechCancelsSuggestion(speech, this.deps.backchannel)) return false;
     this.cancel('cancelled_rep_spoke');
+    return true;
   }
 
   /** Cancel whatever is in flight (pause, seek, speed change, disconnect, shutdown, …). */

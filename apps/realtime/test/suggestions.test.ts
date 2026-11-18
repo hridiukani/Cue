@@ -96,7 +96,13 @@ const CONVERSATION = [
     startedMs: 400,
     endedMs: 1000,
   },
-  { speaker: 'rep' as const, text: 'i understand', startedMs: 2200, endedMs: 2500 },
+  // A real turn (> 4 words), not a backchannel: it cancels a suggestion still streaming.
+  {
+    speaker: 'rep' as const,
+    text: 'i understand what would make it worth it',
+    startedMs: 2200,
+    endedMs: 2500,
+  },
   {
     speaker: 'prospect' as const,
     text: 'we tried a tool before and it failed',
@@ -111,12 +117,20 @@ const LONG_SILENCE = [
   { speaker: 'prospect' as const, text: 'what does it cost', startedMs: 400, endedMs: 900 },
   { speaker: 'rep' as const, text: 'good question', startedMs: 9000, endedMs: 9300 },
 ];
+/** The rep only backchannels (2 words, 400 ms) while the suggestion streams: it must survive. */
+const BACKCHANNEL = [
+  { speaker: 'rep' as const, text: 'hi there', startedMs: 0, endedMs: 300 },
+  { speaker: 'prospect' as const, text: 'what does it cost', startedMs: 400, endedMs: 900 },
+  { speaker: 'rep' as const, text: 'mm-hmm right', startedMs: 1200, endedMs: 1600 },
+  { speaker: 'rep' as const, text: 'so here is the thing', startedMs: 9000, endedMs: 9300 },
+];
 
 let db: Db;
 let closeDb: () => Promise<void>;
 let mock: MockGroq;
 let conversationId: string;
 let silenceId: string;
+let backchannelId: string;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = createDb(inject('testDatabaseUrl')));
@@ -141,6 +155,7 @@ beforeAll(async () => {
     });
   conversationId = await rec('conversation', CONVERSATION);
   silenceId = await rec('long-silence', LONG_SILENCE);
+  backchannelId = await rec('backchannel', BACKCHANNEL);
   mock = new MockGroq();
   await mock.start();
 });
@@ -323,6 +338,27 @@ describe('suggestions end to end (replay + mocked LLM)', () => {
       // At 2x the prospect finishes at 0.5 s and the rep starts at 1.1 s, mid-suggestion.
       await c.waitFor(() => c.of('suggestionDropped').length >= 1, 'dropped');
       expect(c.of('suggestionDropped')[0]?.reason).toBe('cancelled_rep_spoke');
+      c.close();
+    } finally {
+      await server.app.close();
+    }
+  });
+
+  it('keeps the suggestion when the rep only backchannels', async () => {
+    mock.behavior = {
+      firstTokenDelayMs: 100,
+      tokens: ['one ', 'two ', 'three ', 'four '],
+      gapMs: 300,
+    };
+    const { server, url } = await startWithGroq();
+    try {
+      const c = await new Client(url).hello(await makeUser(db));
+      c.send({ type: 'start', recordingId: backchannelId, speed: '1x' });
+      // The prospect finishes at 0.9 s; "mm-hmm right" runs 1.2-1.6 s while tokens stream until ~2 s.
+      await c.waitFor(() => c.of('suggestionCompleted').length === 1, 'completed', 6000);
+      expect(c.of('final').some((f) => f.text === 'mm-hmm right')).toBe(true);
+      expect(c.of('suggestionDropped')).toHaveLength(0);
+      expect(c.of('suggestionCompleted')[0]?.text).toBe('one two three four');
       c.close();
     } finally {
       await server.app.close();

@@ -47,13 +47,28 @@ The browser and server clocks can disagree by tens or hundreds of milliseconds, 
 
 - **Only at 1× or 2×.** Instant-speed replays skip suggestions entirely.
 - **At most one request in flight per session.** A newer prospect line cancels the previous request (`cancelled_newer`).
-- **The rep starting to talk cancels it** (`cancelled_rep_spoke`). So do pause, seek, switching to instant, disconnecting and shutdown (`cancelled_stopped`).
+- **The rep taking the turn cancels it** (`cancelled_rep_spoke`). A short backchannel ("mm-hmm", "right", "yeah, totally") doesn't, because the rep is still listening. See the rule below.
+- **Pause, seek, switching to instant, disconnecting and shutdown** also cancel it (`cancelled_stopped`).
 - **Deadlines:**
   - No first token within **1.5 s** of the request: dropped (`first_token_timeout`). `SUGGESTION_FIRST_TOKEN_TIMEOUT_MS` sets this.
   - Not finished within **5 s**: dropped (`timeout`).
 - **Provider errors:**
   - A **429**: dropped (`rate_limited`), and new suggestions are skipped until the provider's `retry-after` has passed.
   - Other errors: dropped (`api_error`). Nothing is retried.
+
+### When the rep's speech cancels a suggestion
+
+A rep utterance cancels the suggestion in flight only if it has **more than 4 words** or lasts **more than 1.5 s**. Both limits are exclusive: exactly 4 words or exactly 1500 ms still counts as a backchannel.
+
+- **While the rep is talking** (interims), it checks the words and speaking time so far. A real reply cancels as soon as it crosses either limit, and a backchannel never gets that far.
+- **When the line is final,** it checks the whole utterance.
+- **Where to change it:** `REP_CANCEL_MAX_WORDS` and `REP_CANCEL_MAX_MS` in `apps/realtime/src/suggestions/backchannel.ts`. The engine also accepts custom limits through its `backchannel` option.
+
+Why: in real calls the rep often says "mm-hmm" while the prospect is still talking. In the first real Groq replay (2026-11-17), 3 of 4 suggestions were cancelled this way.
+
+What it does to the numbers: the timestamps don't change. Fewer suggestions are dropped as `cancelled_rep_spoke`, so more of them reach `last_token` and `rendered_in_client`, and the completed sample includes some that would have been cancelled before.
+
+Known limit: in replay, the duration comes from the transcript's own timestamps. Datasets with estimated timing (about 160 words per minute) make duration track word count, so the word limit decides most cases there.
 
 A dropped suggestion is stored with `status = 'failed'` and its `failure_reason`, so p50 and p95 can be computed over completed suggestions while the drop rate is tracked separately. Report both: excluding drops makes latency look better than it is.
 
