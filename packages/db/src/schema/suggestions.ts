@@ -1,7 +1,7 @@
 import { foreignKey, index, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { calls } from './calls';
 import { createdAt, id, timestamptz } from './columns';
-import { suggestionStatusEnum } from './enums';
+import { suggestionFailureReasonEnum, suggestionStatusEnum } from './enums';
 import { utterances } from './utterances';
 
 /**
@@ -26,6 +26,8 @@ export const suggestions = pgTable(
     model: text('model').notNull(),
     promptVersion: text('prompt_version').notNull(),
     status: suggestionStatusEnum('status').notNull().default('streaming'),
+    // Set when status = 'failed': cancelled, too slow, rate-limited, provider error…
+    failureReason: suggestionFailureReasonEnum('failure_reason'),
 
     utteranceEndAt: timestamptz('utterance_end_at'),
     requestSentAt: timestamptz('request_sent_at'),

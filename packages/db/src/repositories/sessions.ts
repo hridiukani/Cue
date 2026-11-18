@@ -3,6 +3,7 @@ import { and, asc, eq, lt, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../client';
 import { type Call, calls, recordings, utterances } from '../schema';
+import { getPlaybook } from './playbooks';
 
 /**
  * Replay sessions (rows in `calls` with mode = 'replay'). OWNERSHIP RULE: every
@@ -19,14 +20,19 @@ const isUuid = (v: string) => z.uuid().safeParse(v).success;
 const ownedSession = (userId: string, callId: string) =>
   and(eq(calls.id, callId), eq(calls.userId, userId), eq(calls.mode, 'replay'));
 
-/** Start a replay of a recording. Returns null if the recording doesn't exist. */
+/**
+ * Start a replay of a recording, optionally with one of the user's playbooks.
+ * Returns null if the recording doesn't exist, or the playbook isn't theirs.
+ */
 export async function createReplaySession(
   db: Db,
   userId: string,
   recordingId: string,
   positionMs = 0,
+  playbookId: string | null = null,
 ): Promise<Call | null> {
   if (!isUuid(recordingId)) return null;
+  if (playbookId !== null && !(await getPlaybook(db, userId, playbookId))) return null;
   const [recording] = await db
     .select({ id: recordings.id, title: recordings.title })
     .from(recordings)
@@ -39,6 +45,7 @@ export async function createReplaySession(
       userId,
       mode: 'replay',
       recordingId: recording.id,
+      playbookId,
       title: recording.title,
       startedAt: sql`now()`,
       positionMs,

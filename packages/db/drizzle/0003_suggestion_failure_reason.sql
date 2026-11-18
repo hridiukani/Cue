@@ -1,0 +1,2 @@
+CREATE TYPE "public"."suggestion_failure_reason" AS ENUM('cancelled_newer', 'cancelled_rep_spoke', 'cancelled_stopped', 'first_token_timeout', 'timeout', 'rate_limited', 'api_error', 'empty_output');--> statement-breakpoint
+ALTER TABLE "suggestions" ADD COLUMN "failure_reason" "suggestion_failure_reason";

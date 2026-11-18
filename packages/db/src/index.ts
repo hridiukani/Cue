@@ -49,3 +49,12 @@ export {
   type SessionUtteranceInput,
 } from './repositories/sessions';
 export type { Call, Dataset, Recording } from './schema';
+export {
+  createSuggestion,
+  finishSuggestion,
+  getSuggestion,
+  setSuggestionFeedback,
+  setSuggestionRendered,
+  type NewSuggestionInput,
+  type SuggestionOutcome,
+} from './repositories/suggestions';

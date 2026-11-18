@@ -22,3 +22,15 @@ export const timingEnum = pgEnum('timing', ['real', 'estimated']);
 
 /** A call is either a live coaching session or a replay of an imported recording. */
 export const callModeEnum = pgEnum('call_mode', ['live', 'replay']);
+
+/** Why a suggestion failed (null for completed ones). Mirrors SuggestionFailureReasonSchema. */
+export const suggestionFailureReasonEnum = pgEnum('suggestion_failure_reason', [
+  'cancelled_newer',
+  'cancelled_rep_spoke',
+  'cancelled_stopped',
+  'first_token_timeout',
+  'timeout',
+  'rate_limited',
+  'api_error',
+  'empty_output',
+]);

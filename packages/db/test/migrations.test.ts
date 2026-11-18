@@ -35,6 +35,7 @@ describe('migrations', () => {
       'call_status',
       'feedback_signal',
       'speaker',
+      'suggestion_failure_reason',
       'suggestion_status',
       'timing',
     ]);
