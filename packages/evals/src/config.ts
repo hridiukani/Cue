@@ -15,6 +15,8 @@ const EnvSchema = z.object({
   EVAL_JUDGE_MODEL: z.string().min(1).default('openai/gpt-oss-120b'),
   /** Only needed for cases whose window lives in the local database, and for `candidates`. */
   DATABASE_URL: optional,
+  /** Set by pnpm to the folder the command was typed in (scripts run inside the package). */
+  INIT_CWD: optional,
 });
 
 export interface EvalConfig {
@@ -23,6 +25,8 @@ export interface EvalConfig {
   defaultModel: string;
   judgeModel: string;
   databaseUrl: string | undefined;
+  /** Where relative output paths (--json, --markdown) resolve from: where `pnpm eval` was typed. */
+  invocationDir: string;
 }
 
 /** The only place @cue/evals reads env. */
@@ -38,6 +42,7 @@ export function loadEvalConfig(env: Record<string, string | undefined> = process
     defaultModel: e.GROQ_MODEL,
     judgeModel: e.EVAL_JUDGE_MODEL,
     databaseUrl: e.DATABASE_URL,
+    invocationDir: e.INIT_CWD ?? process.cwd(),
   };
 }
 

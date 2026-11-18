@@ -9,7 +9,12 @@ describe('loadEvalConfig', () => {
       defaultModel: 'openai/gpt-oss-20b',
       judgeModel: 'openai/gpt-oss-120b',
       databaseUrl: undefined,
+      invocationDir: process.cwd(),
     });
+  });
+
+  it('resolves output paths from where pnpm was invoked (INIT_CWD)', () => {
+    expect(loadEvalConfig({ INIT_CWD: '/repo' }).invocationDir).toBe('/repo');
   });
 
   it('treats empty values as unset and reads overrides', () => {

@@ -223,16 +223,20 @@ async function cmdRun(argv: string[]): Promise<number> {
     const file = await saveRun(RESULTS_DIR, run);
     console.log(`\n${formatRun(run, useColor(process.stdout.isTTY) ? COLOR : PLAIN)}`);
     console.log(`\nSaved ${path.relative(process.cwd(), file)}`);
-    if (values.json) {
-      await mkdir(path.dirname(path.resolve(values.json)), { recursive: true });
+    // pnpm runs this script inside packages/evals: resolve paths from where the command was typed.
+    const out = (p: string | undefined) => (p ? path.resolve(config.invocationDir, p) : undefined);
+    const jsonOut = out(values.json);
+    const markdownOut = out(values.markdown);
+    if (jsonOut) {
+      await mkdir(path.dirname(jsonOut), { recursive: true });
       await writeFile(
-        values.json,
+        jsonOut,
         `${JSON.stringify({ meta: run.meta, summary: run.summary }, null, 2)}\n`,
       );
     }
-    if (values.markdown) {
+    if (markdownOut) {
       await appendFile(
-        values.markdown,
+        markdownOut,
         `### Suggestion eval\n\n\`\`\`text\n${formatRun(run)}\n\`\`\`\n`,
       );
     }
