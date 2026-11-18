@@ -30,6 +30,7 @@ const session = (id = SESSION) =>
     durationMs: 90_000,
     timing: 'real',
     capabilities: { seek: true, speeds: ['1x', '2x', 'instant'] },
+    suggestions: { available: true, model: 'llama-3.1-8b-instant', playbook: 'Outbound' },
   });
 const final = (id: string, key: string, startMs: number, text = key) =>
   server({
@@ -169,5 +170,87 @@ describe('reconnect policy', () => {
     expect(shouldReconnect(CLOSE_CODE.unauthorized)).toBe(true);
     expect(shouldReconnect(1000)).toBe(false);
     expect(shouldReconnect(CLOSE_CODE.notFound)).toBe(false);
+  });
+});
+
+describe('suggestions in the reducer', () => {
+  const started = (id: string) =>
+    server({ type: 'suggestionStarted', suggestionId: id, utteranceId: randomUUID() });
+  const token = (id: string, text: string) =>
+    server({ type: 'suggestionToken', suggestionId: id, text });
+  const completed = (id: string, text: string) =>
+    server({
+      type: 'suggestionCompleted',
+      suggestionId: id,
+      text,
+      firstTokenMs: 300,
+      lastTokenMs: 520,
+    });
+
+  it('knows whether suggestions are on, from the session message', () => {
+    expect(run([session()]).suggestions).toEqual({
+      available: true,
+      model: 'llama-3.1-8b-instant',
+      playbook: 'Outbound',
+    });
+  });
+
+  it('goes thinking → streaming → complete, with latency', () => {
+    const s1 = run([session(), started('s1')]);
+    expect(s1.suggestion).toMatchObject({ id: 's1', status: 'thinking', text: '' });
+    const s2 = run([token('s1', 'Ask'), token('s1', 'Ask what it costs')], s1);
+    expect(s2.suggestion).toMatchObject({ status: 'streaming', text: 'Ask what it costs' });
+    const s3 = run([completed('s1', 'Ask what it costs today.')], s2);
+    expect(s3.suggestion).toMatchObject({
+      status: 'complete',
+      text: 'Ask what it costs today.',
+      firstTokenMs: 300,
+      lastTokenMs: 520,
+    });
+    const s4 = run([{ type: 'suggestion_rendered', suggestionId: 's1', renderDelayMs: 14 }], s3);
+    expect(s4.suggestion?.renderedMs).toBe(534);
+  });
+
+  it('shows why a suggestion was dropped, and ignores late tokens for it', () => {
+    const s = run([
+      session(),
+      started('s1'),
+      server({ type: 'suggestionDropped', suggestionId: 's1', reason: 'first_token_timeout' }),
+      token('s1', 'too late'),
+    ]);
+    expect(s.suggestion).toMatchObject({
+      status: 'dropped',
+      reason: 'first_token_timeout',
+      text: '',
+    });
+  });
+
+  it('moves the previous suggestion into the history (newest first, capped)', () => {
+    const actions = [session()];
+    for (let i = 0; i < 8; i++) {
+      const id = `s${String(i)}`;
+      actions.push(started(id), completed(id, `line ${String(i)}`));
+    }
+    const s = run(actions);
+    expect(s.suggestion?.id).toBe('s7');
+    expect(s.pastSuggestions.map((p) => p.id)).toEqual(['s6', 's5', 's4', 's3', 's2']);
+  });
+
+  it('applies saved feedback to the current or a past suggestion', () => {
+    const s = run([
+      session(),
+      started('a'),
+      completed('a', 'one'),
+      started('b'),
+      server({ type: 'feedbackSaved', suggestionId: 'a', signals: ['thumbs_up', 'used'] }),
+    ]);
+    expect(s.pastSuggestions[0]?.feedback).toEqual(['thumbs_up', 'used']);
+    expect(s.suggestion?.feedback).toEqual([]);
+  });
+
+  it('a new session clears suggestions', () => {
+    const s = run([session(), started('a'), session(randomUUID())]);
+    expect(s.suggestion).toBeNull();
+    expect(s.pastSuggestions).toEqual([]);
   });
 });

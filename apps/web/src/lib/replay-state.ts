@@ -1,10 +1,12 @@
 import {
   CLOSE_CODE,
+  type FeedbackSignal,
   type FinalUtterance,
   type ServerMessage,
   type SessionState,
   type Speaker,
   type Speed,
+  type SuggestionFailureReason,
 } from '@cue/shared';
 
 /**
@@ -34,6 +36,28 @@ export interface Banner {
   action?: 'retry' | 'reconnect' | 'restart';
 }
 
+export interface SuggestionView {
+  id: string;
+  utteranceId: string;
+  text: string;
+  status: 'thinking' | 'streaming' | 'complete' | 'dropped';
+  reason?: SuggestionFailureReason;
+  /** Latency from the end of the prospect's line (server-measured). */
+  firstTokenMs?: number;
+  lastTokenMs?: number;
+  /** lastTokenMs + time for this browser to paint it (excludes network transit). */
+  renderedMs?: number;
+  feedback: FeedbackSignal[];
+}
+
+export interface SuggestionsAvailability {
+  available: boolean;
+  model: string | null;
+  playbook: string | null;
+}
+
+export const MAX_PAST_SUGGESTIONS = 5;
+
 export interface ReplayState {
   connection: ConnectionStatus;
   /** Reconnect attempt number (1-based) while reconnecting. */
@@ -47,6 +71,11 @@ export interface ReplayState {
   finals: FinalUtterance[];
   interims: Record<string, InterimLine>;
   banner: Banner | null;
+  suggestions: SuggestionsAvailability | null;
+  /** The suggestion being shown (streaming, done, or just dropped). */
+  suggestion: SuggestionView | null;
+  /** Earlier suggestions, newest first. */
+  pastSuggestions: SuggestionView[];
 }
 
 export type ReplayAction =
@@ -54,7 +83,8 @@ export type ReplayAction =
   | { type: 'connecting' }
   | { type: 'socket_closed'; code: number; attempt: number; willRetry: boolean }
   | { type: 'gave_up' }
-  | { type: 'dismiss_banner' };
+  | { type: 'dismiss_banner' }
+  | { type: 'suggestion_rendered'; suggestionId: string; renderDelayMs: number };
 
 export function initialReplayState(durationMs: number): ReplayState {
   return {
@@ -68,7 +98,21 @@ export function initialReplayState(durationMs: number): ReplayState {
     finals: [],
     interims: {},
     banner: null,
+    suggestions: null,
+    suggestion: null,
+    pastSuggestions: [],
   };
+}
+
+/** Apply `fn` to the suggestion with this id, whether current or past. */
+function updateSuggestion(
+  state: ReplayState,
+  id: string,
+  fn: (s: SuggestionView) => SuggestionView,
+): ReplayState {
+  if (state.suggestion?.id === id) return { ...state, suggestion: fn(state.suggestion) };
+  if (!state.pastSuggestions.some((s) => s.id === id)) return state;
+  return { ...state, pastSuggestions: state.pastSuggestions.map((s) => (s.id === id ? fn(s) : s)) };
 }
 
 /** Insert or replace by utteranceId, keeping timeline order. */
@@ -133,6 +177,13 @@ export function replayReducer(state: ReplayState, action: ReplayAction): ReplayS
     case 'dismiss_banner':
       return { ...state, banner: null };
 
+    case 'suggestion_rendered':
+      return updateSuggestion(state, action.suggestionId, (s) =>
+        s.lastTokenMs === undefined
+          ? s
+          : { ...s, renderedMs: s.lastTokenMs + action.renderDelayMs },
+      );
+
     case 'server':
       return onServerMessage(state, action.message);
   }
@@ -150,12 +201,17 @@ function onServerMessage(state: ReplayState, m: ServerMessage): ReplayState {
       };
 
     case 'session':
-      if (m.sessionId === state.sessionId) return { ...state, durationMs: m.durationMs };
+      if (m.sessionId === state.sessionId) {
+        return { ...state, durationMs: m.durationMs, suggestions: m.suggestions };
+      }
       // A different session (new replay, or a backward seek): start a fresh transcript.
       return {
         ...state,
         sessionId: m.sessionId,
         durationMs: m.durationMs,
+        suggestions: m.suggestions,
+        suggestion: null,
+        pastSuggestions: [],
         finals: [],
         interims: {},
         banner: state.banner?.action === 'restart' ? null : state.banner,
@@ -227,13 +283,49 @@ function onServerMessage(state: ReplayState, m: ServerMessage): ReplayState {
     case 'pong':
       return state;
 
-    // Suggestion messages are handled once the call screen shows suggestions.
-    case 'suggestionStarted':
+    case 'suggestionStarted': {
+      // The previous one (if any) moves to the history.
+      const past = state.suggestion
+        ? [state.suggestion, ...state.pastSuggestions].slice(0, MAX_PAST_SUGGESTIONS)
+        : state.pastSuggestions;
+      return {
+        ...state,
+        pastSuggestions: past,
+        suggestion: {
+          id: m.suggestionId,
+          utteranceId: m.utteranceId,
+          text: '',
+          status: 'thinking',
+          feedback: [],
+        },
+      };
+    }
+
     case 'suggestionToken':
+      return updateSuggestion(state, m.suggestionId, (s) =>
+        s.status === 'thinking' || s.status === 'streaming'
+          ? { ...s, text: m.text, status: 'streaming' }
+          : s,
+      );
+
     case 'suggestionCompleted':
+      return updateSuggestion(state, m.suggestionId, (s) => ({
+        ...s,
+        text: m.text,
+        status: 'complete',
+        firstTokenMs: m.firstTokenMs,
+        lastTokenMs: m.lastTokenMs,
+      }));
+
     case 'suggestionDropped':
+      return updateSuggestion(state, m.suggestionId, (s) => ({
+        ...s,
+        status: 'dropped',
+        reason: m.reason,
+      }));
+
     case 'feedbackSaved':
-      return state;
+      return updateSuggestion(state, m.suggestionId, (s) => ({ ...s, feedback: m.signals }));
   }
 }
 
