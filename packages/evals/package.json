@@ -7,12 +7,17 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "eval": "tsx src/cli.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
+    "@cue/db": "workspace:*",
     "@cue/shared": "workspace:*",
     "@cue/suggest": "workspace:*",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
   }
 }

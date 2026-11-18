@@ -143,6 +143,9 @@ importers:
 
   packages/evals:
     dependencies:
+      '@cue/db':
+        specifier: workspace:*
+        version: link:../db
       '@cue/shared':
         specifier: workspace:*
         version: link:../shared
@@ -152,6 +155,10 @@ importers:
       zod:
         specifier: ^4.6.7
         version: 4.6.7
+    devDependencies:
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
 
   packages/ingest:
     dependencies:
