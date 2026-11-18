@@ -3,5 +3,7 @@ export * from './checks';
 export * from './judge';
 export * from './latency';
 export * from './pricing';
+export * from './resolve';
+export * from './runner';
 export * from './scoring';
 export * from './summary';
