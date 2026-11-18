@@ -109,6 +109,49 @@ export async function getRecordingUtterances(db: Db, recordingId: string) {
     .orderBy(asc(recordingUtterances.idx));
 }
 
+/** A recording identified the way it is everywhere: its dataset and the dataset's own id. */
+export interface RecordingRef {
+  id: string;
+  datasetId: string;
+  externalId: string;
+  title: string;
+  license: string;
+}
+
+const recordingRefColumns = {
+  id: recordings.id,
+  datasetId: recordings.datasetId,
+  externalId: recordings.externalId,
+  title: recordings.title,
+  license: datasets.license,
+};
+
+/** Every imported recording, by dataset then external id (for offline eval tooling). */
+export async function listRecordingRefs(db: Db): Promise<RecordingRef[]> {
+  return db
+    .select(recordingRefColumns)
+    .from(recordings)
+    .innerJoin(datasets, eq(datasets.id, recordings.datasetId))
+    .orderBy(asc(recordings.datasetId), asc(recordings.externalId));
+}
+
+/**
+ * Find a recording by (dataset, external id). Local UUIDs differ on every
+ * machine that ran the importer; this pair doesn't, so eval cases use it.
+ */
+export async function findRecordingByExternalId(
+  db: Db,
+  datasetId: string,
+  externalId: string,
+): Promise<RecordingRef | null> {
+  const [row] = await db
+    .select(recordingRefColumns)
+    .from(recordings)
+    .innerJoin(datasets, eq(datasets.id, recordings.datasetId))
+    .where(and(eq(recordings.datasetId, datasetId), eq(recordings.externalId, externalId)));
+  return row ?? null;
+}
+
 export interface RecordingAudioInfo {
   storageKey: string;
   contentType: string;

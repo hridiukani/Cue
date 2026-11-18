@@ -23,10 +23,12 @@ export {
 } from './repositories/playbooks';
 export type { Playbook } from './schema';
 export {
+  findRecordingByExternalId,
   getRecording,
   getRecordingAudio,
   getRecordingUtterances,
   listDatasets,
+  listRecordingRefs,
   listRecordings,
   upsertDataset,
   upsertRecording,
@@ -38,6 +40,7 @@ export {
   type RecordingFilters,
   type RecordingInput,
   type RecordingListItem,
+  type RecordingRef,
 } from './repositories/recordings';
 export {
   appendSessionUtterance,

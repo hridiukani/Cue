@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  findRecordingByExternalId,
   getRecording,
   getRecordingAudio,
   getRecordingUtterances,
+  listRecordingRefs,
   listRecordings,
   upsertDataset,
   upsertRecording,
@@ -150,5 +152,39 @@ describe('deleting a recording', () => {
         .from(recordingUtterances)
         .where(eq(recordingUtterances.recordingId, recordingId)),
     ).toEqual([]);
+  });
+});
+
+describe('recording refs', () => {
+  it('finds a recording by dataset and external id, with its license', async () => {
+    const datasetId = `test/${randomUUID()}`;
+    await upsertDataset(db, {
+      id: datasetId,
+      name: 'D',
+      url: 'u',
+      license: 'unspecified',
+      revision: null,
+    });
+    const id = await upsertRecording(db, {
+      datasetId,
+      externalId: 'conversation-9',
+      title: 'Conversation 9',
+      timing: 'real',
+      hasAudio: false,
+      language: 'en',
+      metadata: {},
+      utterances: [{ speaker: 'rep', text: 'hi', startedMs: 0, endedMs: 100 }],
+    });
+    const ref = {
+      id,
+      datasetId,
+      externalId: 'conversation-9',
+      title: 'Conversation 9',
+      license: 'unspecified',
+    };
+    expect(await findRecordingByExternalId(db, datasetId, 'conversation-9')).toEqual(ref);
+    expect(await findRecordingByExternalId(db, datasetId, 'conversation-10')).toBeNull();
+    expect(await findRecordingByExternalId(db, 'other/dataset', 'conversation-9')).toBeNull();
+    expect((await listRecordingRefs(db)).filter((r) => r.datasetId === datasetId)).toEqual([ref]);
   });
 });
