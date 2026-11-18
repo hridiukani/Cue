@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSuggestionMessages,
   cleanSuggestion,
+  hasPreamble,
+  lineCount,
   isKnownPromptVersion,
   MAX_SUGGESTION_WORDS,
   PROMPT_VERSION,
@@ -9,6 +11,7 @@ import {
   type PlaybookForPrompt,
   renderPlaybook,
   slidingWindow,
+  stripSuggestion,
   SYSTEM_PROMPT,
   SYSTEM_PROMPTS,
   type WindowUtterance,
@@ -134,5 +137,29 @@ describe('cleanSuggestion', () => {
     expect(cleanSuggestion('Okay, what would it take to try it next month?')).toBe(
       'Okay, what would it take to try it next month?',
     );
+  });
+});
+
+describe('stripSuggestion, hasPreamble, lineCount', () => {
+  it('cleans like cleanSuggestion but never cuts the line', () => {
+    const long = Array.from({ length: 25 }, (_, i) => `w${String(i)}`).join(' ');
+    expect(stripSuggestion(`Rep: ${long}`).split(' ')).toHaveLength(25);
+    expect(cleanSuggestion(`Rep: ${long}`).split(' ')).toHaveLength(MAX_SUGGESTION_WORDS);
+    expect(stripSuggestion('  "Ask   about the budget."  \nWhy: it helps')).toBe(
+      'Ask about the budget.',
+    );
+  });
+
+  it('spots a preamble on the first line only', () => {
+    expect(hasPreamble("Sure! Here's a line: Ask about budget.")).toBe(true);
+    expect(hasPreamble('Rep: Ask about budget.')).toBe(true);
+    expect(hasPreamble('Ask about budget.\nRep: later')).toBe(false);
+    expect(hasPreamble('Okay, what does the team use today?')).toBe(false);
+  });
+
+  it('counts non-empty lines', () => {
+    expect(lineCount('one')).toBe(1);
+    expect(lineCount('one\n\n two \r\nthree')).toBe(3);
+    expect(lineCount('  \n')).toBe(0);
   });
 });

@@ -116,15 +116,38 @@ const PREAMBLE =
 const QUOTES = /^["'“”‘’`]+|["'“”‘’`]+$/g;
 
 /**
+ * The model's line as written: first non-empty line, without a leading
+ * preamble or wrapping quotes, whitespace collapsed. NOT cut to 20 words
+ * (evals use it to see whether the model ran long).
+ */
+export function stripSuggestion(raw: string): string {
+  let text = firstLine(raw);
+  for (let i = 0; i < 2; i++) text = text.replace(PREAMBLE, '').replace(QUOTES, '').trim();
+  return text.split(/\s+/).filter(Boolean).join(' ');
+}
+
+/** True if the first line starts with a label or preamble ("Rep:", "Sure! Here's a line:"). */
+export function hasPreamble(raw: string): boolean {
+  return PREAMBLE.test(firstLine(raw));
+}
+
+/** The first non-empty line, trimmed. */
+export function firstLine(raw: string): string {
+  return (raw.split(/\r?\n/).find((l) => l.trim().length > 0) ?? '').trim();
+}
+
+/** How many non-empty lines the model wrote (the rep only ever sees the first). */
+export function lineCount(raw: string): number {
+  return raw.split(/\r?\n/).filter((l) => l.trim().length > 0).length;
+}
+
+/**
  * Turn raw model output into the line shown to the rep: first line only, no
  * preamble or wrapping quotes, whitespace collapsed, at most 20 words.
  * Returns '' if nothing usable is left.
  */
 export function cleanSuggestion(raw: string): string {
-  let text = (raw.split(/\r?\n/).find((l) => l.trim().length > 0) ?? '').trim();
-  for (let i = 0; i < 2; i++) text = text.replace(PREAMBLE, '').replace(QUOTES, '').trim();
-  const words = text.split(/\s+/).filter(Boolean);
-  return words.slice(0, MAX_SUGGESTION_WORDS).join(' ');
+  return stripSuggestion(raw).split(' ').filter(Boolean).slice(0, MAX_SUGGESTION_WORDS).join(' ');
 }
 
 export function wordCount(text: string): number {
