@@ -38,7 +38,7 @@ export interface RunnerOptions {
   runsPerCase: number;
   concurrency: number;
   /**
-   * Judge calls in flight at once (default 2). Lower than `concurrency`: judge
+   * Judge calls in flight at once (default 1). Lower than `concurrency`: judge
    * calls use ~1,500 tokens each and providers limit tokens per minute
    * (8,000/min for openai/gpt-oss-120b on our Groq account, 2026-11-18).
    */
@@ -269,7 +269,7 @@ export async function runCases(
   for (let attempt = 1; attempt <= opts.runsPerCase; attempt++) {
     for (let index = 0; index < cases.length; index++) tasks.push({ index, attempt });
   }
-  const judgeSlots = new Semaphore(Math.max(1, opts.judgeConcurrency ?? 2));
+  const judgeSlots = new Semaphore(Math.max(1, opts.judgeConcurrency ?? 1));
   let next = 0;
   const worker = async () => {
     for (;;) {

@@ -46,7 +46,7 @@ run options:
   --case <id>             only this case (repeatable)
   --category <name>       only this category (repeatable): ${CATEGORIES.join(', ')}
   --concurrency <n>       generations in parallel (default 4)
-  --judge-concurrency <n> judge calls in parallel (default 2; providers limit tokens per minute)
+  --judge-concurrency <n> judge calls in parallel (default 1; providers limit tokens per minute)
   --min-pass-rate <0-1>   exit 1 if the pass rate is below this
   --json <file>           also write the summary as JSON here
   --markdown <file>       append the report as Markdown (e.g. $GITHUB_STEP_SUMMARY)
@@ -113,7 +113,7 @@ async function cmdRun(argv: string[]): Promise<number> {
   const promptVersion = values['prompt-version'] ?? PROMPT_VERSION;
   const runsPerCase = positiveInt(values.runs, '--runs', 3);
   const concurrency = positiveInt(values.concurrency, '--concurrency', 4);
-  const judgeConcurrency = positiveInt(values['judge-concurrency'], '--judge-concurrency', 2);
+  const judgeConcurrency = positiveInt(values['judge-concurrency'], '--judge-concurrency', 1);
   const minPassRate =
     values['min-pass-rate'] === undefined ? null : Number(values['min-pass-rate']);
   if (minPassRate !== null && !(minPassRate >= 0 && minPassRate <= 1)) {
