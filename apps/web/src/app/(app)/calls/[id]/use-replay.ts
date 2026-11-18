@@ -1,6 +1,12 @@
 'use client';
 
-import { type ClientMessage, parseServerMessage, PROTOCOL_VERSION, type Speed } from '@cue/shared';
+import {
+  type ClientMessage,
+  type FeedbackSignal,
+  parseServerMessage,
+  PROTOCOL_VERSION,
+  type Speed,
+} from '@cue/shared';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
 import {
   initialReplayState,
@@ -32,8 +38,10 @@ export function useReplay(opts: {
   // Shared between the connection lifecycle (effect) and the controls.
   const socketRef = useRef<WebSocket | null>(null);
   const sessionIdRef = useRef<string | null>(null);
-  const pendingStartRef = useRef<Speed | null>(null);
+  const pendingStartRef = useRef<{ speed: Speed; playbookId: string | null } | null>(null);
   const reconnectRef = useRef<() => void>(() => undefined);
+  /** When each completed suggestion arrived (performance.now()), to measure time-to-paint. */
+  const completedAtRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     let disposed = false;
@@ -85,10 +93,18 @@ export function useReplay(opts: {
           if (sessionIdRef.current) send({ type: 'resume', sessionId: sessionIdRef.current });
           else if (pending) {
             pendingStartRef.current = null;
-            send({ type: 'start', recordingId, speed: pending });
+            send({
+              type: 'start',
+              recordingId,
+              speed: pending.speed,
+              ...(pending.playbookId ? { playbookId: pending.playbookId } : {}),
+            });
           }
         }
         if (m.type === 'session') sessionIdRef.current = m.sessionId;
+        if (m.type === 'suggestionCompleted') {
+          completedAtRef.current.set(m.suggestionId, performance.now());
+        }
         dispatch({ type: 'server', message: m });
       };
       socket.onclose = (ev) => {
@@ -121,11 +137,29 @@ export function useReplay(opts: {
       if (s?.readyState === WebSocket.OPEN) s.send(JSON.stringify(msg));
     };
     return {
-      start: (speed: Speed) => {
+      start: (speed: Speed, playbookId: string | null = null) => {
         sessionIdRef.current = null;
         const open = socketRef.current?.readyState === WebSocket.OPEN;
-        if (open) send({ type: 'start', recordingId, speed });
-        else pendingStartRef.current = speed; // sent as soon as we're connected
+        if (open) {
+          send({ type: 'start', recordingId, speed, ...(playbookId ? { playbookId } : {}) });
+        } else {
+          pendingStartRef.current = { speed, playbookId }; // sent as soon as we're connected
+        }
+      },
+      sendFeedback: (suggestionId: string, signal: FeedbackSignal) => {
+        send({ type: 'feedback', suggestionId, signal });
+      },
+      /**
+       * Call once a completed suggestion is on screen. Reports how long it took
+       * to paint since it arrived, measured on this browser's clock only.
+       */
+      reportRendered: (suggestionId: string) => {
+        const arrivedAt = completedAtRef.current.get(suggestionId);
+        if (arrivedAt === undefined) return;
+        completedAtRef.current.delete(suggestionId);
+        const renderDelayMs = Math.max(0, Math.round(performance.now() - arrivedAt));
+        send({ type: 'suggestionRendered', suggestionId, renderDelayMs });
+        dispatch({ type: 'suggestion_rendered', suggestionId, renderDelayMs });
       },
       play: () => {
         send({ type: 'play' });

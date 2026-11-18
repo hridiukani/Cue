@@ -6,6 +6,7 @@ import { buttonClass } from '@/components/button-styles';
 import { formatDuration } from '@/lib/call-filters';
 import type { Banner, ReplayState } from '@/lib/replay-state';
 import { getRealtimeTicket } from '../actions';
+import { SuggestionPanel } from './suggestion-panel';
 import { useReplay } from './use-replay';
 
 const SPEEDS: { value: Speed; label: string }[] = [
@@ -20,14 +21,21 @@ export function ReplayPlayer({
   recordingId,
   durationMs,
   wsUrl,
+  playbooks,
 }: {
   recordingId: string;
   durationMs: number;
   wsUrl: string;
+  /** The signed-in user's playbooks; one can be used for suggestions. */
+  playbooks: { id: string; name: string }[];
 }) {
   const r = useReplay({ recordingId, wsUrl, durationMs, getTicket: getRealtimeTicket });
   const { state } = r;
   const [chosenSpeed, setChosenSpeed] = useState<Speed>('1x');
+  const [playbookId, setPlaybookId] = useState(''); // '' = no playbook
+  const startReplay = () => {
+    r.start(chosenSpeed, playbookId || null);
+  };
   // While dragging the seek bar, show the drag position; send one seek on release.
   const [dragMs, setDragMs] = useState<number | null>(null);
 
@@ -52,7 +60,7 @@ export function ReplayPlayer({
             const action = state.banner?.action;
             if (action === 'retry') r.play();
             else if (action === 'reconnect') r.reconnectNow();
-            else if (action === 'restart') r.start(chosenSpeed);
+            else if (action === 'restart') startReplay();
             r.dismissBanner();
           }}
           onDismiss={r.dismissBanner}
@@ -65,9 +73,7 @@ export function ReplayPlayer({
             <button
               type="button"
               disabled={!connected}
-              onClick={() => {
-                r.start(chosenSpeed);
-              }}
+              onClick={startReplay}
               className={buttonClass('primary')}
             >
               {finished ? '↺ Replay again' : '▶ Start replay'}
@@ -91,6 +97,26 @@ export function ReplayPlayer({
               ▶ Play
             </button>
           )}
+
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-neutral-600">Playbook</span>
+            <select
+              value={playbookId}
+              // Fixed for the session: pick before starting (or start a new replay).
+              disabled={started && !finished}
+              onChange={(e) => {
+                setPlaybookId(e.target.value);
+              }}
+              className="max-w-44 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+            >
+              <option value="">None (generic)</option>
+              {playbooks.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="flex items-center gap-2 text-sm">
             <span className="text-neutral-600">Speed</span>
@@ -137,7 +163,18 @@ export function ReplayPlayer({
         </p>
       </div>
 
-      <Transcript state={state} />
+      {/* Live two-sided transcript on the left, the streaming suggestion on the right. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <Transcript state={state} />
+        <SuggestionPanel
+          availability={state.suggestions}
+          suggestion={state.suggestion}
+          past={state.pastSuggestions}
+          speed={state.speed}
+          onFeedback={r.sendFeedback}
+          onRendered={r.reportRendered}
+        />
+      </div>
     </div>
   );
 }

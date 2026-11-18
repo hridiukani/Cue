@@ -1,4 +1,4 @@
-import { getRecording } from '@cue/db';
+import { getRecording, listPlaybooks } from '@cue/db';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -9,18 +9,21 @@ import { getDb } from '@/server/db';
 import { requireUser } from '@/server/session';
 import { ReplayPlayer } from './replay-player';
 
-export const metadata: Metadata = { title: 'Replay · Cue' };
+export const metadata: Metadata = { title: 'Call · Cue' };
 
 export default async function ReplayPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireUser();
+  const user = await requireUser();
   const { id } = await params;
   // Recordings are a shared library (not user-owned); the replay session the
   // player creates is owned by this user.
-  const recording = await getRecording(getDb(), id);
+  const [recording, playbooks] = await Promise.all([
+    getRecording(getDb(), id),
+    listPlaybooks(getDb(), user.id), // only this user's playbooks
+  ]);
   if (!recording) notFound();
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div>
         <Link href="/calls" className="text-sm text-neutral-500 hover:text-neutral-900">
           ← Call library
@@ -45,6 +48,7 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
       <ReplayPlayer
         recordingId={recording.id}
         durationMs={recording.durationMs}
+        playbooks={playbooks.map((p) => ({ id: p.id, name: p.name }))}
         wsUrl={`${publicConfig.realtimeUrl.replace(/\/$/, '')}/ws`}
       />
     </div>
