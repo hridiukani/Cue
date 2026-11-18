@@ -36,7 +36,8 @@ const EnvSchema = z.object({
     .pipe(z.array(z.url()).min(1)),
   // Suggestions (optional: without a key they're disabled and the browser is told so).
   GROQ_API_KEY: optionalSecret,
-  GROQ_MODEL: z.string().min(1).default('llama-3.1-8b-instant'),
+  // gpt-oss-20b: llama-3.1-8b-instant returned model_not_found for our Groq account (2026-11-17).
+  GROQ_MODEL: z.string().min(1).default('openai/gpt-oss-20b'),
   GROQ_BASE_URL: z.url().default('https://api.groq.com/openai/v1'),
   SUGGESTION_FIRST_TOKEN_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(1500),
   SUGGESTION_TOTAL_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(5000),

@@ -18,7 +18,7 @@ describe('loadConfig', () => {
       allowedOrigins: ['http://localhost:3000'],
       groq: {
         apiKey: undefined,
-        model: 'llama-3.1-8b-instant',
+        model: 'openai/gpt-oss-20b',
         baseUrl: 'https://api.groq.com/openai/v1',
       },
       suggestions: { firstTokenTimeoutMs: 1500, totalTimeoutMs: 5000 },

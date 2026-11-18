@@ -65,7 +65,21 @@ The prompt is ordered from most to least stable:
 2. the playbook;
 3. the last 12 utterances.
 
-That way a provider's automatic prefix caching can reuse the leading tokens. As of 2026-11-17, Groq documents automatic prefix caching only for its `openai/gpt-oss-*` models, not for the default `llama-3.1-8b-instant`. With the default model, the ordering is ready for caching but gets no benefit yet.
+That way a provider's automatic prefix caching can reuse the leading tokens. As of 2026-11-17, Groq documents automatic prefix caching for its `openai/gpt-oss-*` models, which includes the default `openai/gpt-oss-20b`. Hits aren't guaranteed, and the cache expires after a while without use.
+
+## The default model and reasoning settings
+
+The default is `openai/gpt-oss-20b` (`GROQ_MODEL` changes it). The first choice, `llama-3.1-8b-instant`, returned `404 model_not_found` for our Groq account.
+
+gpt-oss is a **reasoning model**: it writes hidden "thinking" tokens before the visible answer. That affects latency, because the first _visible_ token only arrives after the reasoning. It's sent with:
+
+- `reasoning_effort: "low"`: less thinking, so the visible answer starts sooner.
+- `include_reasoning: false`: the reasoning isn't streamed to us.
+- `max_completion_tokens: 512`: with only 48, the reasoning used up the whole budget and no answer came back.
+
+The visible line is still capped at 20 words, and generation stops as soon as it gets there.
+
+A single check on 2026-11-17 returned a full answer in about 300 ms. That's one request, not a latency result.
 
 ## Measured numbers
 
