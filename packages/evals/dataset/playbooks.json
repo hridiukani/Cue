@@ -1,0 +1,40 @@
+{
+  "testmaster": {
+    "name": "TestMaster Suite (eval playbook, from the SaaS dataset's own calls)",
+    "status": "DRAFT",
+    "productDescription": "TestMaster Suite: test automation for software teams. Scriptless test automation, cross-platform testing, a real-time analytics dashboard, and integration with CI/CD tools. Price: $5,000 a month. Includes onboarding resources, hands-on training sessions and an integration support team.",
+    "idealCustomer": "Software teams slowed down by manual testing, tight release deadlines and poor visibility into test coverage.",
+    "objections": [
+      {
+        "objection": "Too expensive / $5,000 a month is a lot",
+        "good_response": "Acknowledge it, then compare it to what manual testing costs them today in time and missed deadlines. There are no discounts or cheaper tiers."
+      },
+      {
+        "objection": "Will it integrate with our current setup?",
+        "good_response": "It integrates with CI/CD tools, and the integration support team helps; ask what their setup is before promising anything more specific."
+      },
+      {
+        "objection": "My team doesn't handle change well",
+        "good_response": "Mention the onboarding resources and hands-on training, and ask what went wrong with past tool changes."
+      }
+    ],
+    "toneNotes": "Casual and friendly, like the calls themselves. Short sentences."
+  },
+  "nexiv": {
+    "name": "Nexiv Solutions (eval playbook, from the gwenshap dataset's own calls)",
+    "status": "DRAFT",
+    "productDescription": "Nexiv Solutions: a unified, cloud-based platform that integrates a company's existing systems, centralises customer and operational data, and adds project tracking and real-time reporting. Implementation follows a migration plan that does setup and testing before go-live, with dedicated onboarding specialists and training.",
+    "idealCustomer": "Mid-sized companies with disconnected tools, data silos, downtime during system changes, and slow manual reporting.",
+    "objections": [
+      {
+        "objection": "We're on a tight budget / what does it cost?",
+        "good_response": "Pricing depends on the package and the size of the operation; don't quote a number. Ask the scoping questions needed for a detailed quote and connect cost to the time and downtime they lose today."
+      },
+      {
+        "objection": "We worry about downtime during the switch",
+        "good_response": "Explain the migration plan (setup and testing before go-live) and the onboarding specialists, then ask what went wrong in past transitions."
+      }
+    ],
+    "toneNotes": "Professional and consultative."
+  }
+}
