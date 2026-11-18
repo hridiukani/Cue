@@ -8,9 +8,9 @@ import {
 import { describe, expect, it } from 'vitest';
 import { parseCases } from './cases';
 import type { JudgeClient } from './judge';
-import { STANDARD_MUST_NOT } from './judge';
+import { JudgeHttpError, STANDARD_MUST_NOT } from './judge';
 import type { ResolvedCase } from './resolve';
-import { FIRST_TOKEN_DEADLINE_MS, runCases, type RunnerDeps } from './runner';
+import { FIRST_TOKEN_DEADLINE_MS, runCases, type RunnerDeps, Semaphore } from './runner';
 
 /** Fake time: the fake model moves it forward as it "streams". */
 class Clock {
@@ -229,6 +229,50 @@ describe('runCases', () => {
     expect(r?.runs[0]?.error).toBe('model: rate limited');
   });
 
+  it('waits out a rate-limited judge and reports each wait', async () => {
+    const clock = new Clock();
+    const sleeps: number[] = [];
+    const limited = new JudgeHttpError(429, 'judge HTTP 429', 7000);
+    const judge = new FakeJudge([limited, limited, verdict(4)]);
+    const waits: [string, number][] = [];
+    const [r] = await runCases(
+      makeCases(1),
+      { ...OPTS, runsPerCase: 1 },
+      {
+        ...deps(new FakeLlm(clock, [{}]), judge, clock, sleeps),
+        onRateLimited: (who, ms) => waits.push([who, ms]),
+      },
+    );
+    expect(r?.runs[0]).toMatchObject({ pass: true, judgeError: null });
+    expect(sleeps).toEqual([7000, 7000]);
+    expect(waits).toEqual([
+      ['judge', 7000],
+      ['judge', 7000],
+    ]);
+  });
+
+  it('keeps judge calls under judgeConcurrency, separately from generation', async () => {
+    const clock = new Clock();
+    let active = 0;
+    let maxActive = 0;
+    const slowJudge: JudgeClient = {
+      model: 'judge-model',
+      async complete() {
+        active++;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((r) => setTimeout(r, 2));
+        active--;
+        return { text: verdict(5), usage: null };
+      },
+    };
+    await runCases(
+      makeCases(6),
+      { ...OPTS, runsPerCase: 1, concurrency: 6, judgeConcurrency: 2 },
+      deps(new FakeLlm(clock, [{}]), slowJudge, clock),
+    );
+    expect(maxActive).toBe(2);
+  });
+
   it('scores an empty answer 1 and skips the judge', async () => {
     const clock = new Clock();
     const judge = new FakeJudge();
@@ -289,5 +333,39 @@ describe('runCases', () => {
         deps(new FakeLlm(clock, [{}]), new FakeJudge(), clock),
       ),
     ).rejects.toThrow(/positive integer/);
+  });
+});
+
+describe('Semaphore', () => {
+  it('lets at most `size` run at once and admits waiters in order', async () => {
+    const sem = new Semaphore(1);
+    const order: string[] = [];
+    let release: () => void = () => undefined;
+    const first = sem.run(
+      () =>
+        new Promise<void>((r) => {
+          order.push('a start');
+          release = r;
+        }),
+    );
+    const second = sem.run(() => {
+      order.push('b start');
+      return Promise.resolve();
+    });
+    const third = sem.run(() => {
+      order.push('c start');
+      return Promise.resolve();
+    });
+    await Promise.resolve();
+    expect(order).toEqual(['a start']);
+    release();
+    await Promise.all([first, second, third]);
+    expect(order).toEqual(['a start', 'b start', 'c start']);
+  });
+
+  it('releases its slot when the task throws', async () => {
+    const sem = new Semaphore(1);
+    await expect(sem.run(() => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+    await expect(sem.run(() => Promise.resolve(42))).resolves.toBe(42);
   });
 });

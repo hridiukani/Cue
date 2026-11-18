@@ -185,7 +185,8 @@ export class GroqJudgeClient implements JudgeClient {
         model: this.model,
         messages,
         temperature: 0,
-        max_completion_tokens: 2048,
+        // Largest reply seen was 656 tokens; providers count this cap against rate limits.
+        max_completion_tokens: 1024,
         response_format: { type: 'json_object' },
         ...(/(^|\/)gpt-oss/i.test(this.model)
           ? { reasoning_effort: 'medium', include_reasoning: false }

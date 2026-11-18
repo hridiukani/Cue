@@ -46,6 +46,7 @@ run options:
   --case <id>             only this case (repeatable)
   --category <name>       only this category (repeatable): ${CATEGORIES.join(', ')}
   --concurrency <n>       generations in parallel (default 4)
+  --judge-concurrency <n> judge calls in parallel (default 2; providers limit tokens per minute)
   --min-pass-rate <0-1>   exit 1 if the pass rate is below this
   --json <file>           also write the summary as JSON here
   --markdown <file>       append the report as Markdown (e.g. $GITHUB_STEP_SUMMARY)
@@ -98,6 +99,7 @@ async function cmdRun(argv: string[]): Promise<number> {
       case: { type: 'string', multiple: true },
       category: { type: 'string', multiple: true },
       concurrency: { type: 'string' },
+      'judge-concurrency': { type: 'string' },
       'min-pass-rate': { type: 'string' },
       json: { type: 'string' },
       markdown: { type: 'string' },
@@ -111,6 +113,7 @@ async function cmdRun(argv: string[]): Promise<number> {
   const promptVersion = values['prompt-version'] ?? PROMPT_VERSION;
   const runsPerCase = positiveInt(values.runs, '--runs', 3);
   const concurrency = positiveInt(values.concurrency, '--concurrency', 4);
+  const judgeConcurrency = positiveInt(values['judge-concurrency'], '--judge-concurrency', 2);
   const minPassRate =
     values['min-pass-rate'] === undefined ? null : Number(values['min-pass-rate']);
   if (minPassRate !== null && !(minPassRate >= 0 && minPassRate <= 1)) {
@@ -176,7 +179,7 @@ async function cmdRun(argv: string[]): Promise<number> {
     let done = 0;
     const records = await runCases(
       resolved,
-      { model, promptVersion, runsPerCase, concurrency },
+      { model, promptVersion, runsPerCase, concurrency, judgeConcurrency },
       {
         llm: new GroqClient({ apiKey: config.groqApiKey, baseUrl: config.groqBaseUrl }),
         judge: new GroqJudgeClient(judgeModel, {
@@ -186,6 +189,8 @@ async function cmdRun(argv: string[]): Promise<number> {
         now: () => performance.now(),
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
         timeout: (ms) => AbortSignal.timeout(ms),
+        // 'w' = waiting out a rate limit (the provider's retry-after); the run continues.
+        onRateLimited: () => process.stdout.write('w'),
         onRunDone: (_id, run) => {
           done++;
           process.stdout.write(run.error ? 'E' : run.pass ? '.' : 'F');

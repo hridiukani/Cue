@@ -37,8 +37,38 @@ export interface RunnerOptions {
   promptVersion: string;
   runsPerCase: number;
   concurrency: number;
+  /**
+   * Judge calls in flight at once (default 2). Lower than `concurrency`: judge
+   * calls use ~1,500 tokens each and providers limit tokens per minute
+   * (8,000/min for openai/gpt-oss-120b on our Groq account, 2026-11-18).
+   */
+  judgeConcurrency?: number;
   totalTimeoutMs?: number;
+  /** Rate-limit retries per request (default 8). Evals can afford to wait. */
   maxRetries?: number;
+}
+
+const DEFAULT_MAX_RETRIES = 8;
+
+/** At most `size` holders at once; the rest wait in order. */
+export class Semaphore {
+  private active = 0;
+  private readonly waiting: (() => void)[] = [];
+  constructor(private readonly size: number) {}
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.active >= this.size) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    } else {
+      this.active++;
+    }
+    try {
+      return await fn();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active--;
+    }
+  }
 }
 
 export interface RunnerDeps {
@@ -50,6 +80,8 @@ export interface RunnerDeps {
   /** An AbortSignal that fires after ms (AbortSignal.timeout in the CLI). */
   timeout: (ms: number) => AbortSignal;
   onRunDone?: (caseId: string, run: RunRecord) => void;
+  /** A request was rate limited and will be retried after `waitMs`. */
+  onRateLimited?: (who: 'model' | 'judge', waitMs: number) => void;
 }
 
 interface Generation {
@@ -76,7 +108,7 @@ async function generate(
     history: rc.window,
     promptVersion: opts.promptVersion,
   });
-  const maxRetries = opts.maxRetries ?? 3;
+  const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   for (let attempt = 0; ; attempt++) {
     let usage: TokenUsage | null = null;
     let raw = '';
@@ -103,7 +135,9 @@ async function generate(
     } catch (err) {
       const wait = retryDelay(err);
       if (wait !== null && attempt < maxRetries) {
-        await deps.sleep(Math.min(wait, 30_000));
+        const ms = Math.min(wait, 60_000);
+        deps.onRateLimited?.('model', ms);
+        await deps.sleep(ms);
         continue;
       }
       const message = err instanceof Error ? err.message : String(err);
@@ -117,6 +151,7 @@ async function judge(
   shown: string,
   opts: RunnerOptions,
   deps: RunnerDeps,
+  slots: Semaphore,
 ): Promise<{
   verdict: RunRecord['verdict'];
   error: string | null;
@@ -135,11 +170,11 @@ async function judge(
   let billed = false;
   const usage = (): TokenUsage | null => (billed ? { ...total } : null);
   let lastError = 'judge failed';
-  const maxRetries = opts.maxRetries ?? 3;
+  const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   // One extra try for an unreadable verdict; rate limits wait and retry.
   for (let attempt = 0, badVerdicts = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await deps.judge.complete(messages);
+      const res = await slots.run(() => deps.judge.complete(messages));
       if (res.usage) {
         billed = true;
         total.promptTokens += res.usage.promptTokens;
@@ -153,8 +188,10 @@ async function judge(
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
       const wait = retryDelay(err);
-      if (wait === null) break;
-      await deps.sleep(Math.min(wait, 30_000));
+      if (wait === null || attempt === maxRetries) break;
+      const ms = Math.min(wait, 60_000);
+      deps.onRateLimited?.('judge', ms);
+      await deps.sleep(ms);
     }
   }
   return { verdict: null, error: lastError, usage: usage() };
@@ -165,12 +202,13 @@ async function runOnce(
   attempt: number,
   opts: RunnerOptions,
   deps: RunnerDeps,
+  judgeSlots: Semaphore,
 ): Promise<RunRecord> {
   const gen = await generate(rc, opts, deps);
   const checks = gen.error ? null : runDeterministicChecks(gen.raw, rc.case.rubric.bannedPhrases);
   const graded =
     checks && checks.shown !== ''
-      ? await judge(rc, checks.shown, opts, deps)
+      ? await judge(rc, checks.shown, opts, deps, judgeSlots)
       : { verdict: null, error: null, usage: null };
   const score = scoreRun({
     checks,
@@ -220,6 +258,7 @@ export async function runCases(
   for (let attempt = 1; attempt <= opts.runsPerCase; attempt++) {
     for (let index = 0; index < cases.length; index++) tasks.push({ index, attempt });
   }
+  const judgeSlots = new Semaphore(Math.max(1, opts.judgeConcurrency ?? 2));
   let next = 0;
   const worker = async () => {
     for (;;) {
@@ -228,7 +267,7 @@ export async function runCases(
       const rc = cases[task.index];
       const record = records[task.index];
       if (!rc || !record) return;
-      const run = await runOnce(rc, task.attempt, opts, deps);
+      const run = await runOnce(rc, task.attempt, opts, deps, judgeSlots);
       record.runs.push(run);
       deps.onRunDone?.(rc.case.id, run);
     }
