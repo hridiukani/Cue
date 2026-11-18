@@ -23,7 +23,7 @@ Cue replays recorded sales calls through the realtime pipeline. The recordings c
 
 The `liva-ai/real-sales` dataset card doesn't state a license. Without one, we have no explicit permission to redistribute or publicly display its content. Therefore:
 
-- **Its transcripts must stay behind login in any public deployment.** The app already requires sign-in for every page, including the call library. Don't add public or shareable views of these recordings, and don't publish them in demos, screenshots or exports.
+- **Its transcripts and audio must stay behind login in any public deployment.** The app already requires sign-in for every page, including the call library, and the audio route (`/api/recordings/:id/audio`) answers 401 to signed-out requests. Don't add public or shareable views of these recordings, and don't publish them in demos, screenshots or exports.
 - Use it for local development and evaluation only.
 - Revisit this if the publisher adds a license.
 
@@ -86,4 +86,15 @@ Imported audio goes through the `BlobStore` interface (`packages/storage`). The 
 
 - Keys look like `liva-ai/real-sales/conversation-1.wav`.
 - An S3-compatible store can implement the same interface later, without changing the importer.
-- Audio is stored **unprocessed**. Speech-to-text and browser playback are later steps.
+- Audio is stored **unprocessed**. Speech-to-text is a later step.
+- The web app reads the same `BLOB_STORE_DIR`. If it's unset, the default is `../../data/blobs` relative to the folder Next runs in, which is `apps/web` under `pnpm dev`.
+
+## Audio playback in the replay
+
+A recording with stored audio plays its audio on the replay page. See docs/latency.md, "Audio playback", for how the audio stays on the transcript's timeline.
+
+- **The route:** `GET /api/recordings/:id/audio` streams the original file.
+- **Range requests:** with a single `Range: bytes=…` it answers 206 and exactly those bytes, so `<audio>` seeks without downloading the roughly 150 MB file. A range past the end gets 416. Several ranges, or a malformed header, get the whole file (200).
+- **Who can get it:** signed-out requests get 401. Unknown ids, recordings without stored audio, and files missing from the store all get the same 404.
+- **Caching:** `Cache-Control: private, no-store`, so shared caches and the disk cache don't keep it.
+- **Audio not downloaded:** recordings imported without `--with-audio` show an "Audio not downloaded" badge and replay as transcript only.

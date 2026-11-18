@@ -33,6 +33,23 @@ Other replay caveats:
 - **Interims are simulated** (a few words at a time), not real speech-to-text partials.
 - **Datasets without timestamps** (gwenshap, SaaS) use an estimated pace: about 160 words per minute, with 600 ms between turns. The gap before the rep "speaks" again is artificial. At 2× it's only 300 ms real time, so most suggestions there are cancelled because the rep started talking (see below).
 
+## Audio playback doesn't change the timeline
+
+Replays of recordings with stored audio (real-sales) play the audio in the browser. **The transcript timeline on the realtime server stays the only clock**:
+
+- The server's `state` messages drive the audio. The audio never sends anything back.
+- Play, pause, seek and speed go to the server, and the audio follows what the server reports. The audio has no controls of its own, apart from mute.
+- So buffering audio never delays a transcript line, a final or a suggestion. The latency timestamps are unaffected.
+
+`apps/web/src/lib/audio-sync.ts` keeps the two together:
+
+- **Measuring drift:** drift is the audio position minus the transcript position. Between server updates, the transcript position is extrapolated at the replay speed. Drift is measured every 250 ms and always shown on the page:
+  - within **200 ms**, in sync;
+  - beyond that, "drifting", with the number.
+- **Correcting drift:** if drift stays beyond 200 ms for **1 s**, the audio is moved back onto the timeline. The correction is counted and shown as a resync ("Resynced 2× (last: 640 ms behind at 3:04)"). It isn't hidden.
+- **Seeks:** a seek, or a new session after a backward seek, moves the audio at once. That isn't counted as drift.
+- **Other states the page shows:** buffering (the transcript keeps going), audio ended before the transcript, a load error, a browser that blocked autoplay (with an "Enable audio" button), and no audio at instant speed.
+
 ## How `client_rendered_at` avoids clock skew
 
 The browser and server clocks can disagree by tens or hundreds of milliseconds, so we never store a browser wall-clock time:
