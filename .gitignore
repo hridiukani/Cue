@@ -33,3 +33,8 @@ data/
 *.pcm
 *.mp3
 *.flac
+
+# eval outputs: model output and transcript windows from datasets that can't be
+# redistributed (liva-ai/real-sales has no license). See packages/evals/README.md.
+packages/evals/results/
+packages/evals/candidates/
