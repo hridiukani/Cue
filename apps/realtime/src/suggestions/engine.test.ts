@@ -68,19 +68,24 @@ class ScriptedLlm implements LlmClient {
 
 class MemoryStore implements SuggestionStore {
   readonly rows = new Map<string, Record<string, unknown>>();
+  /** Simulates a slow database: finish() resolves only when this is called. */
+  holdFinish: Promise<void> | null = null;
   create(s: Parameters<SuggestionStore['create']>[0]) {
     this.rows.set(s.id, { ...s, status: 'streaming' });
     return Promise.resolve(true);
   }
-  finish(id: string, outcome: Parameters<SuggestionStore['finish']>[1]) {
+  async finish(id: string, outcome: Parameters<SuggestionStore['finish']>[1]) {
+    if (this.holdFinish) await this.holdFinish;
     const row = this.rows.get(id);
-    if (row?.status !== 'streaming') return Promise.resolve(false);
+    if (row?.status !== 'streaming') return false;
     Object.assign(row, outcome);
-    return Promise.resolve(true);
+    return true;
   }
   rendered(id: string, at: Date) {
     const row = this.rows.get(id);
-    if (row) row.clientRenderedAt = at;
+    // Like the real query: only a completed suggestion can get a render time.
+    if (row?.status !== 'complete') return Promise.resolve(false);
+    row.clientRenderedAt = at;
     return Promise.resolve(true);
   }
 }
@@ -171,6 +176,21 @@ describe('SuggestionEngine', () => {
     expect(store.rows.get(id)?.clientRenderedAt).toEqual(new Date(sentAt + 16));
     expect(await engine.onRendered(id, 16)).toBe(false); // only once
     expect(await engine.onRendered(randomUUID(), 16)).toBe(false); // unknown id
+  });
+
+  it('keeps the render time even when the browser reports before the complete write lands', async () => {
+    let release: () => void = () => undefined;
+    store.holdFinish = new Promise<void>((r) => (release = r));
+    prospect();
+    await flush();
+    await run(1000);
+    const id = of('suggestionCompleted')[0]?.suggestionId ?? '';
+    const report = engine.onRendered(id, 9); // database still writing 'complete'
+    await flush();
+    expect(store.rows.get(id)?.status).toBe('streaming');
+    release();
+    expect(await report).toBe(true);
+    expect(store.rows.get(id)?.clientRenderedAt).toBeInstanceOf(Date);
   });
 
   it('a newer prospect utterance cancels the one in flight; never two at once', async () => {

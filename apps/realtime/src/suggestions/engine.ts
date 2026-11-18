@@ -82,6 +82,8 @@ export class SuggestionEngine {
   private cooldownUntil = 0;
   /** Server time each completed suggestion was sent, for the browser's render report. */
   private readonly completedSentAt = new Map<string, number>();
+  /** The final write for each suggestion; a render report must land after it (it needs status=complete). */
+  private readonly finishWrites = new Map<string, Promise<boolean>>();
   private readonly pending = new Set<Promise<unknown>>();
 
   constructor(
@@ -137,7 +139,13 @@ export class SuggestionEngine {
     const sentAt = this.completedSentAt.get(suggestionId);
     if (sentAt === undefined) return false;
     this.completedSentAt.delete(suggestionId);
-    return this.track(this.deps.store.rendered(suggestionId, new Date(sentAt + renderDelayMs)));
+    const renderedAt = new Date(sentAt + renderDelayMs);
+    // A fast browser can report before our 'complete' write has landed: wait for it.
+    const finished = this.finishWrites.get(suggestionId) ?? Promise.resolve(true);
+    this.finishWrites.delete(suggestionId);
+    return this.track(
+      finished.then((ok) => (ok ? this.deps.store.rendered(suggestionId, renderedAt) : false)),
+    );
   }
 
   /** Stop: cancel in-flight work and wait for its writes to finish. */
@@ -291,9 +299,14 @@ export class SuggestionEngine {
         firstTokenAt: flight.firstTokenAt === null ? null : new Date(flight.firstTokenAt),
       };
     }
-    void this.track(
+    const write = this.track(
       flight.inserted.then((ok) => (ok ? store.finish(flight.id, save) : false)).catch(() => false),
     );
+    this.finishWrites.set(flight.id, write);
+    void write.finally(() => {
+      // Keep it only as long as a render report might still need it.
+      if (outcome.status !== 'complete') this.finishWrites.delete(flight.id);
+    });
   }
 
   private track<T>(p: Promise<T>): Promise<T> {
