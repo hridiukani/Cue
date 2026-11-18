@@ -29,6 +29,19 @@ Rules:
 - Never invent facts, prices, features or customer names that aren't in the playbook or the conversation.
 - Match the playbook's tone notes when given.`;
 
+/**
+ * Every system prompt by version. When SYSTEM_PROMPT changes, add the new
+ * version here and keep the old entry, so `pnpm eval --prompt-version <old>`
+ * can still compare it with the new one.
+ */
+export const SYSTEM_PROMPTS: Readonly<Record<string, string>> = {
+  [PROMPT_VERSION]: SYSTEM_PROMPT,
+};
+
+export function isKnownPromptVersion(version: string): boolean {
+  return Object.hasOwn(SYSTEM_PROMPTS, version);
+}
+
 export interface PlaybookForPrompt {
   name: string;
   productDescription: string;
@@ -72,8 +85,17 @@ export function buildSuggestionMessages(input: {
   playbook: PlaybookForPrompt | null;
   /** Conversation so far, oldest first; the last item is the prospect line that triggered this. */
   history: readonly WindowUtterance[];
+  /** Which system prompt to use (default: the current one). Evals pass older ones. */
+  promptVersion?: string;
 }): { messages: ChatMessage[]; promptVersion: string } {
-  const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }];
+  const base = input.promptVersion ?? PROMPT_VERSION;
+  const system = SYSTEM_PROMPTS[base];
+  if (system === undefined) {
+    throw new Error(
+      `Unknown prompt version "${base}". Known: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`,
+    );
+  }
+  const messages: ChatMessage[] = [{ role: 'system', content: system }];
   if (input.playbook) messages.push({ role: 'system', content: renderPlaybook(input.playbook) });
   const transcript = slidingWindow(input.history)
     .map((u) => `${LABEL[u.speaker]}: ${u.text}`)
@@ -84,7 +106,7 @@ export function buildSuggestionMessages(input: {
   });
   return {
     messages,
-    promptVersion: input.playbook ? PROMPT_VERSION : PROMPT_VERSION_NO_PLAYBOOK,
+    promptVersion: input.playbook ? base : `${base}/no-playbook`,
   };
 }
 

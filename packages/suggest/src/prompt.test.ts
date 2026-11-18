@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildSuggestionMessages,
   cleanSuggestion,
+  isKnownPromptVersion,
   MAX_SUGGESTION_WORDS,
   PROMPT_VERSION,
   PROMPT_VERSION_NO_PLAYBOOK,
@@ -9,6 +10,7 @@ import {
   renderPlaybook,
   slidingWindow,
   SYSTEM_PROMPT,
+  SYSTEM_PROMPTS,
   type WindowUtterance,
   WINDOW_SIZE,
 } from './prompt';
@@ -66,6 +68,22 @@ describe('buildSuggestionMessages', () => {
     });
     expect(messages.map((m) => m.role)).toEqual(['system', 'user']);
     expect(promptVersion).toBe(PROMPT_VERSION_NO_PLAYBOOK);
+  });
+
+  it('builds a named prompt version from the registry, and refuses unknown ones', () => {
+    expect(isKnownPromptVersion(PROMPT_VERSION)).toBe(true);
+    expect(SYSTEM_PROMPTS[PROMPT_VERSION]).toBe(SYSTEM_PROMPT);
+    const named = buildSuggestionMessages({
+      playbook: PLAYBOOK,
+      history: history(2),
+      promptVersion: PROMPT_VERSION,
+    });
+    expect(named).toEqual(buildSuggestionMessages({ playbook: PLAYBOOK, history: history(2) }));
+    expect(isKnownPromptVersion('suggest-v0')).toBe(false);
+    expect(isKnownPromptVersion('toString')).toBe(false); // not fooled by Object.prototype
+    expect(() =>
+      buildSuggestionMessages({ playbook: null, history: history(1), promptVersion: 'nope' }),
+    ).toThrow(/Unknown prompt version "nope"\. Known: suggest-v1/);
   });
 });
 

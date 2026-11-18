@@ -86,6 +86,75 @@ describe('GroqClient', () => {
     expect(await collect(client)).toEqual(['Hi']);
   });
 
+  describe('token usage', () => {
+    async function usageFrom(pieces: string[]) {
+      const seen: unknown[] = [];
+      const client = new GroqClient({
+        apiKey: 'k',
+        baseUrl: 'http://x',
+        fetch: () => Promise.resolve(sse(pieces)),
+      });
+      const out: string[] = [];
+      for await (const d of client.stream(
+        { ...REQ, onUsage: (u) => seen.push(u) },
+        new AbortController().signal,
+      )) {
+        out.push(d);
+      }
+      return { out, seen };
+    }
+
+    it('reports the final chunk usage, including hidden reasoning tokens (Groq shape)', async () => {
+      // Shape captured from a real Groq gpt-oss-20b stream on 2026-11-17.
+      const usage = {
+        queue_time: 0.05,
+        prompt_tokens: 78,
+        completion_tokens: 21,
+        total_tokens: 99,
+        completion_tokens_details: { reasoning_tokens: 7 },
+      };
+      const { out, seen } = await usageFrom([
+        chunk('Hi'),
+        `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }], x_groq: { id: 'r', usage }, usage })}\n\n`,
+        'data: [DONE]\n\n',
+      ]);
+      expect(out).toEqual(['Hi']);
+      expect(seen).toEqual([{ promptTokens: 78, completionTokens: 21, reasoningTokens: 7 }]);
+    });
+
+    it('reads usage from x_groq alone, and without reasoning details', async () => {
+      const { seen } = await usageFrom([
+        `data: ${JSON.stringify({ choices: [], x_groq: { usage: { prompt_tokens: 5, completion_tokens: 2 } } })}\n\n`,
+        'data: [DONE]\n\n',
+      ]);
+      expect(seen).toEqual([{ promptTokens: 5, completionTokens: 2, reasoningTokens: null }]);
+    });
+
+    it('reports nothing when the provider sends no usage', async () => {
+      const { seen } = await usageFrom([chunk('Hi'), 'data: [DONE]\n\n']);
+      expect(seen).toEqual([]);
+    });
+
+    it('never sends the callback to the provider', async () => {
+      let body = '';
+      const client = new GroqClient({
+        apiKey: 'k',
+        baseUrl: 'http://x',
+        fetch: (_url, init) => {
+          body = init.body as string;
+          return Promise.resolve(sse(['data: [DONE]\n\n']));
+        },
+      });
+      for await (const _ of client.stream(
+        { ...REQ, onUsage: () => undefined },
+        new AbortController().signal,
+      )) {
+        // drain
+      }
+      expect(Object.keys(JSON.parse(body) as object)).not.toContain('onUsage');
+    });
+  });
+
   it('maps 429 to rate_limited with retry-after in ms', async () => {
     const client = new GroqClient({
       apiKey: 'k',

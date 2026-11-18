@@ -18,6 +18,15 @@ export interface LlmRequest {
   reasoningEffort?: 'low' | 'medium' | 'high';
   /** Reasoning models only: false keeps the hidden reasoning out of the stream. */
   includeReasoning?: boolean;
+  /** Called once with the provider's token counts, if it reports them (for cost). */
+  onUsage?: (usage: TokenUsage) => void;
+}
+
+/** Billed tokens for one request. Reasoning tokens are part of completionTokens. */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  reasoningTokens: number | null;
 }
 
 export type LlmErrorKind = 'rate_limited' | 'http' | 'network' | 'bad_response' | 'aborted';
@@ -44,6 +53,24 @@ const ChunkSchema = z
       .default([]),
   })
   .loose();
+// Groq sends token counts on the final chunk, as `usage` and as `x_groq.usage`.
+const UsageSchema = z
+  .object({
+    prompt_tokens: z.number().int().nonnegative(),
+    completion_tokens: z.number().int().nonnegative(),
+    completion_tokens_details: z
+      .object({ reasoning_tokens: z.number().int().nonnegative().nullish() })
+      .loose()
+      .nullish(),
+  })
+  .loose();
+const UsageChunkSchema = z
+  .object({
+    usage: UsageSchema.nullish(),
+    x_groq: z.object({ usage: UsageSchema.nullish() }).loose().nullish(),
+  })
+  .loose();
+
 const StreamErrorSchema = z.object({ error: z.object({ message: z.string() }).loose() }).loose();
 
 const DEFAULT_RETRY_AFTER_MS = 10_000;
@@ -126,7 +153,8 @@ export class GroqClient implements LlmClient {
           if (!line.startsWith('data:')) continue; // blank lines, ": keep-alive" comments, event names
           const data = line.slice(5).trim();
           if (data === '[DONE]') return;
-          const delta = parseDelta(data);
+          const { delta, usage } = parseChunk(data);
+          if (usage && req.onUsage) req.onUsage(usage);
           if (delta) yield delta;
         }
       }
@@ -136,7 +164,7 @@ export class GroqClient implements LlmClient {
   }
 }
 
-function parseDelta(data: string): string | null {
+function parseChunk(data: string): { delta: string | null; usage: TokenUsage | null } {
   let json: unknown;
   try {
     json = JSON.parse(data);
@@ -148,7 +176,17 @@ function parseDelta(data: string): string | null {
   const parsed = ChunkSchema.safeParse(json);
   if (!parsed.success) throw new LlmError('bad_response', 'unexpected stream chunk');
   const content = parsed.data.choices[0]?.delta?.content;
-  return content === undefined || content === null || content === '' ? null : content;
+  const delta = content === undefined || content === null || content === '' ? null : content;
+  const u = UsageChunkSchema.safeParse(json);
+  const raw = u.success ? (u.data.usage ?? u.data.x_groq?.usage ?? null) : null;
+  const usage: TokenUsage | null = raw
+    ? {
+        promptTokens: raw.prompt_tokens,
+        completionTokens: raw.completion_tokens,
+        reasoningTokens: raw.completion_tokens_details?.reasoning_tokens ?? null,
+      }
+    : null;
+  return { delta, usage };
 }
 
 /** ": <message>" from an OpenAI-style error body, or '' if there isn't a readable one. */
