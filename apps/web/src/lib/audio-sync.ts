@@ -202,3 +202,11 @@ export class AudioSync {
     });
   }
 }
+
+/** "640 ms behind", "1.2 s ahead", "0 ms": drift as the rep should read it. */
+export function describeDrift(driftMs: number): string {
+  const abs = Math.abs(Math.round(driftMs));
+  const size = abs < 1000 ? `${String(abs)} ms` : `${(abs / 1000).toFixed(1)} s`;
+  if (abs === 0) return size;
+  return `${size} ${driftMs > 0 ? 'ahead' : 'behind'}`;
+}

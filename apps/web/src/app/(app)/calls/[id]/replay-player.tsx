@@ -6,6 +6,7 @@ import { buttonClass } from '@/components/button-styles';
 import { formatDuration } from '@/lib/call-filters';
 import type { Banner, ReplayState } from '@/lib/replay-state';
 import { getRealtimeTicket } from '../actions';
+import { AudioTrack } from './audio-track';
 import { SuggestionPanel } from './suggestion-panel';
 import { useReplay } from './use-replay';
 
@@ -22,10 +23,13 @@ export function ReplayPlayer({
   durationMs,
   wsUrl,
   playbooks,
+  audioSrc,
 }: {
   recordingId: string;
   durationMs: number;
   wsUrl: string;
+  /** The recording's audio route, or null for transcript-only recordings. */
+  audioSrc: string | null;
   /** The signed-in user's playbooks; one can be used for suggestions. */
   playbooks: { id: string; name: string }[];
 }) {
@@ -161,6 +165,16 @@ export function ReplayPlayer({
         <p className="text-xs text-neutral-500">
           Seeking back starts a new replay session; the earlier one keeps everything it saved.
         </p>
+        {audioSrc && (
+          <AudioTrack
+            src={audioSrc}
+            transcriptDurationMs={state.durationMs}
+            sessionId={state.sessionId}
+            playback={state.playback}
+            positionMs={state.positionMs}
+            speed={state.speed}
+          />
+        )}
       </div>
 
       {/* Live two-sided transcript on the left, the streaming suggestion on the right. */}

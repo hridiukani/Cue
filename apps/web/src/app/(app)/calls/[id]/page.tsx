@@ -1,4 +1,4 @@
-import { getRecording, listPlaybooks } from '@cue/db';
+import { getRecording, getRecordingAudio, listPlaybooks } from '@cue/db';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -16,9 +16,10 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   // Recordings are a shared library (not user-owned); the replay session the
   // player creates is owned by this user.
-  const [recording, playbooks] = await Promise.all([
+  const [recording, playbooks, audio] = await Promise.all([
     getRecording(getDb(), id),
     listPlaybooks(getDb(), user.id), // only this user's playbooks
+    getRecordingAudio(getDb(), id),
   ]);
   if (!recording) notFound();
 
@@ -32,7 +33,18 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
           <span className="text-neutral-600">{recording.dataset.name}</span>
           <TimingBadge timing={recording.timing} />
-          {recording.hasAudio && <Badge tone="blue">Audio available</Badge>}
+          {audio ? (
+            <Badge tone="blue">Audio</Badge>
+          ) : (
+            recording.hasAudio && (
+              <Badge
+                tone="amber"
+                title="Import with: pnpm ingest -- --dataset real-sales --with-audio"
+              >
+                Audio not downloaded
+              </Badge>
+            )
+          )}
           <span className="tabular-nums text-neutral-500">
             {formatDuration(recording.durationMs)}
           </span>
@@ -50,6 +62,7 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
         durationMs={recording.durationMs}
         playbooks={playbooks.map((p) => ({ id: p.id, name: p.name }))}
         wsUrl={`${publicConfig.realtimeUrl.replace(/\/$/, '')}/ws`}
+        audioSrc={audio ? `/api/recordings/${recording.id}/audio` : null}
       />
     </div>
   );

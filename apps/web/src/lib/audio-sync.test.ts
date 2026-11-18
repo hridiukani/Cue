@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   AudioSync,
+  describeDrift,
   JUMP_MS,
   type MediaLike,
   RESYNC_AFTER_MS,
@@ -327,5 +328,19 @@ describe('AudioSync', () => {
     clock.t += 1000;
     serverSays({ positionMs: 1000 + JUMP_MS - 100 }); // a late update, not a seek
     expect(media.seeks).toEqual([]);
+  });
+});
+
+describe('describeDrift', () => {
+  it.each([
+    [0, '0 ms'],
+    [0.4, '0 ms'],
+    [40, '40 ms ahead'],
+    [-640, '640 ms behind'],
+    [999, '999 ms ahead'],
+    [1000, '1.0 s ahead'],
+    [-1250, '1.3 s behind'],
+  ])('%d → %s', (ms, text) => {
+    expect(describeDrift(ms)).toBe(text);
   });
 });
