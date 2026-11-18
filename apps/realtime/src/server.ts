@@ -6,11 +6,14 @@ import { TicketVerifier } from './auth/ticket-verifier';
 import { type Clock, realClock } from './clock';
 import type { RealtimeConfig } from './config';
 import { SessionManager } from './session/session-manager';
+import { GroqClient, type LlmClient } from './suggestions/llm';
 import { handleConnection, type SocketLike } from './ws/connection';
 
 export interface ServerDeps {
   db: Db;
   clock?: Clock;
+  /** Override the LLM (tests). Default: Groq when GROQ_API_KEY is set, else suggestions off. */
+  llm?: LlmClient | null;
 }
 
 export interface RealtimeServer {
@@ -21,7 +24,17 @@ export interface RealtimeServer {
 export function buildServer(config: RealtimeConfig, deps: ServerDeps): RealtimeServer {
   const app = Fastify({ logger: { level: config.logLevel } });
   const clock = deps.clock ?? realClock;
-  const manager = new SessionManager(deps.db, clock, app.log);
+  const llm =
+    deps.llm !== undefined
+      ? deps.llm
+      : config.groq.apiKey
+        ? new GroqClient({ apiKey: config.groq.apiKey, baseUrl: config.groq.baseUrl })
+        : null;
+  if (!llm) app.log.warn('GROQ_API_KEY is not set: replays run without suggestions');
+  const manager = new SessionManager(deps.db, clock, app.log, {
+    llm,
+    config: { model: config.groq.model, ...config.suggestions },
+  });
   const verifier = new TicketVerifier(config.ticketSecret, clock);
   const sockets = new Set<SocketLike>();
 

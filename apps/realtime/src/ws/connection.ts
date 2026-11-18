@@ -1,4 +1,4 @@
-import { type Db, getSessionUser } from '@cue/db';
+import { type Db, getSessionUser, setSuggestionFeedback } from '@cue/db';
 import {
   CLOSE_CODE,
   type ClientMessage,
@@ -112,14 +112,20 @@ export function handleConnection(socket: SocketLike, deps: ConnectionDeps): void
   };
 
   const onStart = async (uid: string, msg: Extract<ClientMessage, { type: 'start' }>) => {
-    const r = await deps.manager.start(uid, msg.recordingId, msg.speed, msg.positionMs ?? 0);
+    const r = await deps.manager.start(
+      uid,
+      msg.recordingId,
+      msg.speed,
+      msg.positionMs ?? 0,
+      msg.playbookId ?? null,
+    );
     if (!r.ok) {
-      fail(
-        'not_found',
-        r.error === 'empty_recording'
-          ? 'This recording has no transcript.'
-          : 'Recording not found.',
-      );
+      const message = {
+        not_found: 'Recording not found.',
+        empty_recording: 'This recording has no transcript.',
+        playbook_not_found: 'Playbook not found.',
+      }[r.error];
+      fail('not_found', message);
       return;
     }
     await switchTo(r.session);
@@ -198,6 +204,13 @@ export function handleConnection(socket: SocketLike, deps: ConnectionDeps): void
       await onResume(uid, msg.sessionId);
       return;
     }
+    if (msg.type === 'feedback') {
+      // Any of the user's suggestions, including ones from an earlier session.
+      const signals = await setSuggestionFeedback(deps.db, uid, msg.suggestionId, msg.signal);
+      if (signals) send({ type: 'feedbackSaved', suggestionId: msg.suggestionId, signals });
+      else fail('not_found', 'Suggestion not found.');
+      return;
+    }
     const current = session;
     if (!current) {
       fail('invalid_state', 'No replay is running.');
@@ -207,10 +220,8 @@ export function handleConnection(socket: SocketLike, deps: ConnectionDeps): void
     else if (msg.type === 'pause') current.pause();
     else if (msg.type === 'setSpeed') current.setSpeed(msg.speed);
     else if (msg.type === 'seek') await onSeek(uid, current, msg.positionMs);
-    else {
-      // suggestionRendered / feedback: wired up with the suggestion engine.
-      fail('invalid_state', 'Suggestions are not available for this session.');
-    }
+    // A render report for a suggestion this session didn't just complete is ignored.
+    else await current.onSuggestionRendered(msg.suggestionId, msg.renderDelayMs);
   };
 
   // Process messages one at a time, in order.

@@ -1,6 +1,8 @@
 import type { ServerMessageBody, SessionState, Speed } from '@cue/shared';
 import type { Clock, TimerHandle } from '../clock';
 import type { CallSource, SourceEvent } from '../sources/call-source';
+import type { SuggestionEngine } from '../suggestions/engine';
+import type { WindowUtterance } from '../suggestions/prompt';
 import { BACKPRESSURE, shouldSend, slowClientAction } from './backpressure';
 
 /** Where a session's messages go: one browser socket (or nothing while disconnected). */
@@ -26,12 +28,24 @@ export interface SessionStore {
 export interface SessionInfo {
   sessionId: string;
   recordingId: string;
+  /** The user's playbook for suggestions, if one was chosen. */
+  playbookId: string | null;
   title: string;
   durationMs: number;
   timing: 'real' | 'estimated';
 }
 
 type FinalEvent = Extract<SourceEvent, { type: 'final' }>;
+
+export interface SuggestionsInfo {
+  available: boolean;
+  model: string | null;
+  playbook: string | null;
+}
+
+const NO_SUGGESTIONS: SuggestionsInfo = { available: false, model: null, playbook: null };
+/** Conversation kept in memory for the prompt's sliding window (a little more than it needs). */
+const HISTORY_KEEP = 50;
 type PauseReason =
   'user' | 'client_slow' | 'persist_failed' | 'db_backlog' | 'disconnected' | 'shutdown';
 
@@ -65,6 +79,11 @@ export class ReplaySession {
   private readonly pauseReasons = new Set<PauseReason>();
   private readonly saved = new Set<string>();
   private readonly queue: FinalEvent[] = [];
+  /** Server time each final was emitted: the replay's stand-in for utterance_end. */
+  private readonly emittedAt = new WeakMap<FinalEvent, number>();
+  private readonly history: WindowUtterance[] = [];
+  private readonly engine: SuggestionEngine | null;
+  private readonly suggestions: SuggestionsInfo;
   private draining: Promise<void> | null = null;
   private sourceEnded = false;
   private terminal: 'ended' | 'failed' | null = null;
@@ -78,9 +97,25 @@ export class ReplaySession {
     private readonly source: CallSource,
     private readonly store: SessionStore,
     private readonly clock: Clock,
-    opts: { savedSignatures?: Iterable<string>; onFinished?: (s: ReplaySession) => void } = {},
+    opts: {
+      savedSignatures?: Iterable<string>;
+      /** Saved conversation so far (resume), oldest first, for the suggestion window. */
+      history?: readonly WindowUtterance[];
+      onFinished?: (s: ReplaySession) => void;
+      /** Omit to run without suggestions. The create function gets a send function bound to this session. */
+      suggestions?: {
+        info: SuggestionsInfo;
+        create: (send: (body: ServerMessageBody) => void) => SuggestionEngine;
+      };
+    } = {},
   ) {
     for (const s of opts.savedSignatures ?? []) this.saved.add(s);
+    this.history.push(...(opts.history ?? []).slice(-HISTORY_KEEP));
+    this.suggestions = opts.suggestions?.info ?? NO_SUGGESTIONS;
+    this.engine =
+      opts.suggestions?.create((body) => {
+        this.sink?.send(body);
+      }) ?? null;
     this.onFinished = opts.onFinished;
     this.unsubscribe = source.on((e) => {
       this.onSourceEvent(e);
@@ -99,9 +134,14 @@ export class ReplaySession {
     if (this.terminal) return this.terminal;
     return this.source.playing ? 'playing' : 'paused';
   }
-  /** What the browser is told about suggestions for this session (wired to the engine later). */
-  get suggestionsInfo(): { available: boolean; model: string | null; playbook: string | null } {
-    return { available: false, model: null, playbook: null };
+  /** What the browser is told about suggestions for this session. */
+  get suggestionsInfo(): SuggestionsInfo {
+    return this.suggestions;
+  }
+
+  /** The browser painted a completed suggestion (duration on its own clock). */
+  async onSuggestionRendered(suggestionId: string, renderDelayMs: number): Promise<boolean> {
+    return (await this.engine?.onRendered(suggestionId, renderDelayMs)) ?? false;
   }
 
   get capabilities() {
@@ -145,6 +185,7 @@ export class ReplaySession {
   /** Forward seeks stay in this session (backward seeks start a new one: SessionManager). */
   seekForward(toMs: number): void {
     if (this.terminal) return;
+    this.engine?.cancel('cancelled_stopped');
     this.source.seek(toMs);
     this.sendState();
     void this.savePosition(true);
@@ -152,6 +193,7 @@ export class ReplaySession {
 
   setSpeed(speed: Speed): void {
     if (this.terminal) return;
+    if (speed === 'instant') this.engine?.cancel('cancelled_stopped'); // no suggestions at instant
     this.source.setSpeed(speed);
     this.sendState();
   }
@@ -161,6 +203,7 @@ export class ReplaySession {
     this.pauseFor('shutdown');
     await this.settle();
     await this.savePosition(true);
+    await this.engine?.close();
     this.stopSlowTimer();
     this.unsubscribe();
     await this.source.close();
@@ -174,6 +217,7 @@ export class ReplaySession {
     if (opts.silent) this.sink = null;
     this.source.pause();
     await this.settle();
+    await this.engine?.close();
     this.terminal = status;
     this.stopSlowTimer();
     this.unsubscribe();
@@ -198,6 +242,8 @@ export class ReplaySession {
     switch (e.type) {
       case 'interim': {
         const sink = this.sink;
+        // The rep talking over a suggestion makes it moot.
+        if (e.speaker === 'rep') this.engine?.onRepSpeaking();
         if (sink && shouldSend('interim', sink.bufferedBytes())) {
           sink.send({
             type: 'interim',
@@ -213,6 +259,7 @@ export class ReplaySession {
       }
       case 'final': {
         if (this.saved.has(utteranceSignature(e))) return; // already saved before a resume
+        this.emittedAt.set(e, this.clock.now());
         this.queue.push(e);
         if (this.queue.length > MAX_QUEUE) this.pauseFor('db_backlog');
         void this.drain();
@@ -273,6 +320,7 @@ export class ReplaySession {
             startMs: head.startMs,
             endMs: head.endMs,
           });
+          this.afterFinalSent(head, saved.id);
           await this.store.savePosition(this.safePosition());
           this.lastPositionSaveAt = this.clock.now();
           if (this.queue.length <= RESUME_QUEUE && this.pauseReasons.delete('db_backlog')) {
@@ -285,6 +333,25 @@ export class ReplaySession {
       if (this.sourceEnded && this.queue.length === 0 && !this.terminal) await this.finish('ended');
     })();
     return this.draining;
+  }
+
+  /** Saved and sent: add to the conversation and let the suggestion engine react. */
+  private afterFinalSent(e: FinalEvent, utteranceId: string): void {
+    this.history.push({ speaker: e.speaker, text: e.text });
+    if (this.history.length > HISTORY_KEEP)
+      this.history.splice(0, this.history.length - HISTORY_KEEP);
+    if (!this.engine) return;
+    if (e.speaker === 'rep') {
+      this.engine.onRepSpeaking();
+    } else if (this.source.playing) {
+      // Only while playing: a final drained after a pause shouldn't start a suggestion.
+      this.engine.onProspectFinal({
+        utteranceId,
+        emittedAt: this.emittedAt.get(e) ?? this.clock.now(),
+        history: this.history,
+        speed: this.source.speed,
+      });
+    }
   }
 
   private async persistWithRetry(e: FinalEvent): Promise<{ id: string } | null> {
@@ -340,6 +407,9 @@ export class ReplaySession {
   private pauseFor(reason: PauseReason): void {
     const wasPlaying = this.source.playing;
     this.pauseReasons.add(reason);
+    // Any pause (user, slow client, disconnect, shutdown…) stops the conversation,
+    // so a suggestion in flight would arrive out of context: cancel it.
+    this.engine?.cancel('cancelled_stopped');
     this.source.pause();
     if (wasPlaying) this.sendState();
   }

@@ -16,7 +16,23 @@ describe('loadConfig', () => {
       databaseUrl: REQUIRED.DATABASE_URL,
       ticketSecret: REQUIRED.REALTIME_TICKET_SECRET,
       allowedOrigins: ['http://localhost:3000'],
+      groq: {
+        apiKey: undefined,
+        model: 'llama-3.1-8b-instant',
+        baseUrl: 'https://api.groq.com/openai/v1',
+      },
+      suggestions: { firstTokenTimeoutMs: 1500, totalTimeoutMs: 5000 },
     });
+  });
+
+  it('reads Groq settings and treats an empty key as unset', () => {
+    expect(loadConfig({ ...REQUIRED, GROQ_API_KEY: '' }).groq.apiKey).toBeUndefined();
+    expect(
+      loadConfig({ ...REQUIRED, GROQ_API_KEY: 'gsk_x', GROQ_MODEL: 'openai/gpt-oss-20b' }).groq,
+    ).toMatchObject({ apiKey: 'gsk_x', model: 'openai/gpt-oss-20b' });
+    expect(() => loadConfig({ ...REQUIRED, SUGGESTION_FIRST_TOKEN_TIMEOUT_MS: '5' })).toThrow(
+      /SUGGESTION_FIRST_TOKEN_TIMEOUT_MS/,
+    );
   });
 
   it('coerces REALTIME_PORT from a string', () => {

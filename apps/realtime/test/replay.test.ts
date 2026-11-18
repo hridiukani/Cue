@@ -1,21 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import type { AddressInfo } from 'node:net';
 import {
   createDb,
   type Db,
   getSession,
   listSessionUtterances,
-  schema,
   upsertDataset,
   upsertRecording,
 } from '@cue/db';
-import { type ServerMessage, ServerMessageSchema } from '@cue/shared';
 import { signTicket } from '@cue/shared/ticket';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import WebSocket from 'ws';
 import { FakeClock } from '../src/clock';
-import { loadConfig } from '../src/config';
-import { buildServer, type RealtimeServer } from '../src/server';
+import { Client, makeUser, startServer, TEST_TICKET_SECRET } from './helpers';
 
 /**
  * End-to-end: a real realtime server on a random port, real WebSocket
@@ -23,7 +18,7 @@ import { buildServer, type RealtimeServer } from '../src/server';
  * 1x playback is fast.
  */
 
-const SECRET = 'r'.repeat(32);
+const SECRET = TEST_TICKET_SECRET;
 const FIXTURE = [
   { speaker: 'rep' as const, text: 'hello there friend', startedMs: 0, endedMs: 300 },
   { speaker: 'prospect' as const, text: 'hi how are you', startedMs: 400, endedMs: 700 },
@@ -57,103 +52,13 @@ beforeAll(async () => {
 });
 afterAll(() => closeDb());
 
-async function makeUser(): Promise<string> {
-  const [u] = await db
-    .insert(schema.users)
-    .values({ email: `rt-${randomUUID()}@test.local` })
-    .returning({ id: schema.users.id });
-  if (!u) throw new Error('no user');
-  return u.id;
-}
-
-function config() {
-  return loadConfig({
-    LOG_LEVEL: 'silent',
-    DATABASE_URL: inject('testDatabaseUrl'),
-    REALTIME_TICKET_SECRET: SECRET,
-    REALTIME_PORT: '0',
-  });
-}
-
-async function startServer(
-  opts: { clock?: FakeClock } = {},
-): Promise<{ server: RealtimeServer; url: string }> {
-  const server = buildServer(config(), { db, ...(opts.clock ? { clock: opts.clock } : {}) });
-  await server.app.listen({ host: '127.0.0.1', port: 0 });
-  const { port } = server.app.server.address() as AddressInfo;
-  return { server, url: `ws://127.0.0.1:${String(port)}/ws` };
-}
-
-/** A test client that records every server message and the close code. */
-class Client {
-  readonly messages: ServerMessage[] = [];
-  closeCode: number | null = null;
-  private readonly ws: WebSocket;
-  readonly opened: Promise<void>;
-  readonly closed: Promise<number>;
-
-  constructor(url: string, headers: Record<string, string> = {}) {
-    this.ws = new WebSocket(url, { headers });
-    this.opened = new Promise((resolve, reject) => {
-      this.ws.once('open', () => {
-        resolve();
-      });
-      this.ws.once('unexpected-response', (_req, res) => {
-        reject(new Error(`upgrade refused: ${String(res.statusCode)}`));
-      });
-      this.ws.once('error', reject);
-    });
-    this.closed = new Promise((resolve) => {
-      this.ws.once('close', (code) => {
-        this.closeCode = code;
-        resolve(code);
-      });
-    });
-    this.ws.on('message', (data: Buffer) => {
-      this.messages.push(ServerMessageSchema.parse(JSON.parse(data.toString('utf8'))));
-    });
-  }
-
-  send(msg: object): void {
-    this.ws.send(JSON.stringify(msg));
-  }
-
-  close(): void {
-    this.ws.close();
-  }
-
-  of<T extends ServerMessage['type']>(type: T): Extract<ServerMessage, { type: T }>[] {
-    return this.messages.filter((m): m is Extract<ServerMessage, { type: T }> => m.type === type);
-  }
-
-  async waitFor(pred: () => boolean, label: string, timeoutMs = 8000): Promise<void> {
-    const start = Date.now();
-    while (!pred()) {
-      if (Date.now() - start > timeoutMs) {
-        throw new Error(
-          `timed out waiting for ${label}; got ${JSON.stringify(this.messages.map((m) => m.type))}`,
-        );
-      }
-      await new Promise((r) => setTimeout(r, 10));
-    }
-  }
-
-  /** Open, authenticate, and wait for `ready`. */
-  async hello(userId: string): Promise<this> {
-    await this.opened;
-    this.send({ type: 'hello', v: 1, ticket: signTicket(userId, SECRET) });
-    await this.waitFor(() => this.of('ready').length === 1, 'ready');
-    return this;
-  }
-}
-
 const finalsText = (c: Client) => c.of('final').map((f) => f.text);
 
 describe('replay over WebSocket', () => {
   it('streams interims and finals in order, saves each final, and ends the session', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
-      const user = await makeUser();
+      const user = await makeUser(db);
       const c = await new Client(url).hello(user);
       c.send({ type: 'start', recordingId, speed: '1x' });
       await c.waitFor(() => c.of('state').some((s) => s.state === 'ended'), 'ended');
@@ -183,9 +88,9 @@ describe('replay over WebSocket', () => {
   });
 
   it('resumes after the socket drops: snapshot of saved finals, then the rest, no duplicates', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
-      const user = await makeUser();
+      const user = await makeUser(db);
       const a = await new Client(url).hello(user);
       a.send({ type: 'start', recordingId, speed: '1x' });
       await a.waitFor(() => a.of('final').length >= 1, 'first final');
@@ -218,8 +123,8 @@ describe('replay over WebSocket', () => {
   });
 
   it('survives a server restart: the session stays live, resumes and finishes', async () => {
-    const first = await startServer();
-    const user = await makeUser();
+    const first = await startServer(db);
+    const user = await makeUser(db);
     const a = await new Client(first.url).hello(user);
     a.send({ type: 'start', recordingId, speed: '1x' });
     await a.waitFor(() => a.of('final').length >= 1, 'first final');
@@ -231,7 +136,7 @@ describe('replay over WebSocket', () => {
     expect(afterShutdown?.status).toBe('live');
     expect(afterShutdown?.positionMs).toBeGreaterThanOrEqual(300);
 
-    const second = await startServer();
+    const second = await startServer(db);
     try {
       const b = await new Client(second.url).hello(user);
       b.send({ type: 'resume', sessionId });
@@ -247,9 +152,9 @@ describe('replay over WebSocket', () => {
   });
 
   it('seeking backward starts a new session and leaves the old one untouched', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
-      const user = await makeUser();
+      const user = await makeUser(db);
       const c = await new Client(url).hello(user);
       c.send({ type: 'start', recordingId, speed: '1x' });
       await c.waitFor(() => c.of('final').length >= 2, 'two finals');
@@ -286,9 +191,9 @@ describe('replay over WebSocket', () => {
   });
 
   it('plays the whole recording at instant speed', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
-      const user = await makeUser();
+      const user = await makeUser(db);
       const c = await new Client(url).hello(user);
       c.send({ type: 'start', recordingId, speed: 'instant' });
       await c.waitFor(() => c.of('state').some((s) => s.state === 'ended'), 'ended');
@@ -303,14 +208,14 @@ describe('replay over WebSocket', () => {
 
 describe('WebSocket auth and validation', () => {
   it('closes with 4401 for a bad ticket, and refuses a reused one', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
       const bad = new Client(url);
       await bad.opened;
       bad.send({ type: 'hello', v: 1, ticket: 'v1.forged.ticket' });
       expect(await bad.closed).toBe(4401);
 
-      const user = await makeUser();
+      const user = await makeUser(db);
       const ticket = signTicket(user, SECRET);
       const first = new Client(url);
       await first.opened;
@@ -327,7 +232,7 @@ describe('WebSocket auth and validation', () => {
   });
 
   it('closes with 4401 when a command arrives before hello', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
       const c = new Client(url);
       await c.opened;
@@ -339,10 +244,10 @@ describe('WebSocket auth and validation', () => {
   });
 
   it("treats another user's session as not found (4404) and writes nothing to it", async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
-      const alice = await makeUser();
-      const bob = await makeUser();
+      const alice = await makeUser(db);
+      const bob = await makeUser(db);
       const a = await new Client(url).hello(alice);
       a.send({ type: 'start', recordingId, speed: 'instant' });
       await a.waitFor(() => a.of('final').length >= 1, 'final');
@@ -359,9 +264,9 @@ describe('WebSocket auth and validation', () => {
   });
 
   it('answers a malformed message with an error and keeps the connection open', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
-      const c = await new Client(url).hello(await makeUser());
+      const c = await new Client(url).hello(await makeUser(db));
       c.send({ type: 'seek', positionMs: -5 });
       await c.waitFor(() => c.of('error').length === 1, 'error');
       expect(c.of('error')[0]?.code).toBe('bad_request');
@@ -375,7 +280,7 @@ describe('WebSocket auth and validation', () => {
 
   it('closes with 4408 if hello never arrives', async () => {
     const clock = new FakeClock(Date.now());
-    const { server, url } = await startServer({ clock });
+    const { server, url } = await startServer(db, { clock });
     try {
       const c = new Client(url);
       await c.opened;
@@ -388,7 +293,7 @@ describe('WebSocket auth and validation', () => {
   });
 
   it('refuses the upgrade from a browser origin that is not allowed', async () => {
-    const { server, url } = await startServer();
+    const { server, url } = await startServer(db);
     try {
       const c = new Client(url, { origin: 'https://evil.example' });
       await expect(c.opened).rejects.toThrow(/403/);

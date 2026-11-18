@@ -7,6 +7,12 @@ const postgresUrl = z
     message: 'must be a postgres:// or postgresql:// URL',
   });
 
+// An empty value (e.g. 'GROQ_API_KEY=' copied from .env.example) means "not set".
+const optionalSecret = z
+  .string()
+  .optional()
+  .transform((v) => (v === undefined || v.trim() === '' ? undefined : v.trim()));
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   REALTIME_HOST: z.string().min(1).default('localhost'),
@@ -28,6 +34,12 @@ const EnvSchema = z.object({
         .filter(Boolean),
     )
     .pipe(z.array(z.url()).min(1)),
+  // Suggestions (optional: without a key they're disabled and the browser is told so).
+  GROQ_API_KEY: optionalSecret,
+  GROQ_MODEL: z.string().min(1).default('llama-3.1-8b-instant'),
+  GROQ_BASE_URL: z.url().default('https://api.groq.com/openai/v1'),
+  SUGGESTION_FIRST_TOKEN_TIMEOUT_MS: z.coerce.number().int().min(100).max(30_000).default(1500),
+  SUGGESTION_TOTAL_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(5000),
 });
 
 type Env = z.infer<typeof EnvSchema>;
@@ -40,6 +52,8 @@ export interface RealtimeConfig {
   databaseUrl: string;
   ticketSecret: string;
   allowedOrigins: string[];
+  groq: { apiKey: string | undefined; model: string; baseUrl: string };
+  suggestions: { firstTokenTimeoutMs: number; totalTimeoutMs: number };
 }
 
 /** Load the repo-root .env into process.env if it exists. Real env vars win. */
@@ -66,5 +80,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     databaseUrl: e.DATABASE_URL,
     ticketSecret: e.REALTIME_TICKET_SECRET,
     allowedOrigins: e.REALTIME_ALLOWED_ORIGINS,
+    groq: { apiKey: e.GROQ_API_KEY, model: e.GROQ_MODEL, baseUrl: e.GROQ_BASE_URL },
+    suggestions: {
+      firstTokenTimeoutMs: e.SUGGESTION_FIRST_TOKEN_TIMEOUT_MS,
+      totalTimeoutMs: e.SUGGESTION_TOTAL_TIMEOUT_MS,
+    },
   };
 }
