@@ -43,6 +43,23 @@ describe('LocalFsBlobStore', () => {
     await store.delete('missing.wav'); // not an error
   });
 
+  it('streams an inclusive byte range', async () => {
+    await store.put('r.bin', Buffer.from('0123456789'));
+    expect(await text(await store.get('r.bin', { start: 0, end: 0 }))).toBe('0');
+    expect(await text(await store.get('r.bin', { start: 3, end: 6 }))).toBe('3456');
+    expect(await text(await store.get('r.bin', { start: 9, end: 9 }))).toBe('9');
+  });
+
+  it.each([
+    { start: 0, end: 10 }, // past the last byte
+    { start: 5, end: 4 },
+    { start: -1, end: 2 },
+    { start: 1.5, end: 2 },
+  ])('rejects the range %j', async (range) => {
+    await store.put('r.bin', Buffer.from('0123456789'));
+    await expect(store.get('r.bin', range)).rejects.toBeInstanceOf(RangeError);
+  });
+
   it('deletes', async () => {
     await store.put('x.bin', Buffer.from([1, 2, 3]));
     await store.delete('x.bin');

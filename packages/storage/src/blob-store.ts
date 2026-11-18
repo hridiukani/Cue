@@ -8,12 +8,22 @@ import type { Readable } from 'node:stream';
 export interface BlobStore {
   /** Write a blob atomically (all or nothing). Returns its size and SHA-256. */
   put(key: string, body: Readable | Uint8Array): Promise<PutResult>;
-  /** Stream a blob. Throws BlobNotFoundError if it doesn't exist. */
-  get(key: string): Promise<Readable>;
+  /**
+   * Stream a blob, or only bytes `start..end` (both inclusive, like an HTTP
+   * Range). Throws BlobNotFoundError if it doesn't exist, and RangeError if
+   * the range isn't inside the blob.
+   */
+  get(key: string, range?: ByteRange): Promise<Readable>;
   /** Size of a blob, or null if it doesn't exist. */
   head(key: string): Promise<{ bytes: number } | null>;
   /** Delete a blob. Deleting a missing blob is not an error. */
   delete(key: string): Promise<void>;
+}
+
+/** An inclusive byte range: `{ start: 0, end: 0 }` is the first byte. */
+export interface ByteRange {
+  start: number;
+  end: number;
 }
 
 export interface PutResult {

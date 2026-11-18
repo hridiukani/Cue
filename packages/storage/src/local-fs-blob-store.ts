@@ -4,7 +4,13 @@ import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { assertValidKey, BlobNotFoundError, type BlobStore, type PutResult } from './blob-store';
+import {
+  assertValidKey,
+  BlobNotFoundError,
+  type BlobStore,
+  type ByteRange,
+  type PutResult,
+} from './blob-store';
 
 /** BlobStore backed by a local folder (default for development: ./data/blobs). */
 export class LocalFsBlobStore implements BlobStore {
@@ -48,10 +54,24 @@ export class LocalFsBlobStore implements BlobStore {
     return { bytes, sha256: hash.digest('hex') };
   }
 
-  async get(key: string): Promise<Readable> {
+  async get(key: string, range?: ByteRange): Promise<Readable> {
     const file = this.pathFor(key);
-    if (!(await this.head(key))) throw new BlobNotFoundError(key);
-    return createReadStream(file);
+    const info = await this.head(key);
+    if (!info) throw new BlobNotFoundError(key);
+    if (!range) return createReadStream(file);
+    const { start, end } = range;
+    const valid =
+      Number.isSafeInteger(start) &&
+      Number.isSafeInteger(end) &&
+      start >= 0 &&
+      start <= end &&
+      end < info.bytes;
+    if (!valid) {
+      throw new RangeError(
+        `bytes ${String(start)}-${String(end)} outside blob of ${String(info.bytes)}`,
+      );
+    }
+    return createReadStream(file, { start, end });
   }
 
   async head(key: string): Promise<{ bytes: number } | null> {
