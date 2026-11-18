@@ -99,6 +99,11 @@ export class ReplaySession {
     if (this.terminal) return this.terminal;
     return this.source.playing ? 'playing' : 'paused';
   }
+  /** What the browser is told about suggestions for this session (wired to the engine later). */
+  get suggestionsInfo(): { available: boolean; model: string | null; playbook: string | null } {
+    return { available: false, model: null, playbook: null };
+  }
+
   get capabilities() {
     return { seek: this.source.capabilities.seek, speeds: [...this.source.capabilities.speeds] };
   }

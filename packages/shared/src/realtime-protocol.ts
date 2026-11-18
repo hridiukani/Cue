@@ -21,6 +21,23 @@ export type Speed = z.infer<typeof SpeedSchema>;
 const ms = z.number().int().nonnegative();
 const id = z.uuid();
 
+/** Feedback a rep can give on a suggestion from the call screen. */
+export const FeedbackSignalSchema = z.enum(['thumbs_up', 'thumbs_down', 'used']);
+export type FeedbackSignal = z.infer<typeof FeedbackSignalSchema>;
+
+/** Why a suggestion was dropped (stored in suggestions.failure_reason). */
+export const SuggestionFailureReasonSchema = z.enum([
+  'cancelled_newer', // a newer prospect utterance arrived
+  'cancelled_rep_spoke', // the rep started talking over it
+  'cancelled_stopped', // pause, seek, speed change to instant, disconnect or shutdown
+  'first_token_timeout', // no first token within the deadline (1.5 s): late is worse than none
+  'timeout', // the whole suggestion took too long
+  'rate_limited', // provider returned 429
+  'api_error', // other provider or network error
+  'empty_output', // the model returned nothing usable
+]);
+export type SuggestionFailureReason = z.infer<typeof SuggestionFailureReasonSchema>;
+
 // ---------------------------------------------------------------- client → server
 
 const Hello = z
@@ -36,6 +53,8 @@ const Start = z
     recordingId: id,
     speed: SpeedSchema,
     positionMs: ms.optional(),
+    // One of the user's playbooks; suggestions use a generic prompt without one.
+    playbookId: id.optional(),
   })
   .strict();
 const Resume = z.object({ type: z.literal('resume'), sessionId: id }).strict();
@@ -44,6 +63,21 @@ const Pause = z.object({ type: z.literal('pause') }).strict();
 const Seek = z.object({ type: z.literal('seek'), positionMs: ms }).strict();
 const SetSpeed = z.object({ type: z.literal('setSpeed'), speed: SpeedSchema }).strict();
 const Ping = z.object({ type: z.literal('ping') }).strict();
+/**
+ * The browser painted a completed suggestion. It reports a DURATION on its own
+ * clock (message received → painted), never a wall-clock time, so browser/server
+ * clock skew can't corrupt the stored timestamps.
+ */
+const SuggestionRendered = z
+  .object({
+    type: z.literal('suggestionRendered'),
+    suggestionId: id,
+    renderDelayMs: z.number().int().min(0).max(60_000),
+  })
+  .strict();
+const Feedback = z
+  .object({ type: z.literal('feedback'), suggestionId: id, signal: FeedbackSignalSchema })
+  .strict();
 
 export const ClientMessageSchema = z.discriminatedUnion('type', [
   Hello,
@@ -54,6 +88,8 @@ export const ClientMessageSchema = z.discriminatedUnion('type', [
   Seek,
   SetSpeed,
   Ping,
+  SuggestionRendered,
+  Feedback,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
@@ -104,6 +140,14 @@ const Session = z
     durationMs: ms,
     timing: z.enum(['real', 'estimated']),
     capabilities: z.object({ seek: z.boolean(), speeds: z.array(SpeedSchema) }).strict(),
+    // Whether this session generates suggestions (needs an LLM API key), and with what.
+    suggestions: z
+      .object({
+        available: z.boolean(),
+        model: z.string().nullable(),
+        playbook: z.string().nullable(),
+      })
+      .strict(),
     ...envelope,
   })
   .strict();
@@ -146,6 +190,42 @@ const ErrorMessage = z
   .strict();
 const Pong = z.object({ type: z.literal('pong'), ...envelope }).strict();
 
+// Suggestions: started → (token)* → completed | dropped
+const SuggestionStarted = z
+  .object({ type: z.literal('suggestionStarted'), suggestionId: id, utteranceId: id, ...envelope })
+  .strict();
+/** The suggestion text so far (cleaned up), not a delta, so the client just replaces it. */
+const SuggestionToken = z
+  .object({ type: z.literal('suggestionToken'), suggestionId: id, text: z.string(), ...envelope })
+  .strict();
+const SuggestionCompleted = z
+  .object({
+    type: z.literal('suggestionCompleted'),
+    suggestionId: id,
+    text: z.string(),
+    // Server-measured latency from utterance_end (see docs/latency.md).
+    firstTokenMs: ms,
+    lastTokenMs: ms,
+    ...envelope,
+  })
+  .strict();
+const SuggestionDropped = z
+  .object({
+    type: z.literal('suggestionDropped'),
+    suggestionId: id,
+    reason: SuggestionFailureReasonSchema,
+    ...envelope,
+  })
+  .strict();
+const FeedbackSaved = z
+  .object({
+    type: z.literal('feedbackSaved'),
+    suggestionId: id,
+    signals: z.array(FeedbackSignalSchema),
+    ...envelope,
+  })
+  .strict();
+
 export const ServerMessageSchema = z.discriminatedUnion('type', [
   Ready,
   Session,
@@ -156,6 +236,11 @@ export const ServerMessageSchema = z.discriminatedUnion('type', [
   Status,
   ErrorMessage,
   Pong,
+  SuggestionStarted,
+  SuggestionToken,
+  SuggestionCompleted,
+  SuggestionDropped,
+  FeedbackSaved,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 

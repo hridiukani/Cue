@@ -226,6 +226,14 @@ function onServerMessage(state: ReplayState, m: ServerMessage): ReplayState {
 
     case 'pong':
       return state;
+
+    // Suggestion messages are handled once the call screen shows suggestions.
+    case 'suggestionStarted':
+    case 'suggestionToken':
+    case 'suggestionCompleted':
+    case 'suggestionDropped':
+    case 'feedbackSaved':
+      return state;
   }
 }
 

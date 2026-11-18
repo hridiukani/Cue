@@ -21,6 +21,9 @@ describe('parseClientMessage', () => {
       { type: 'seek', positionMs: 0 },
       { type: 'setSpeed', speed: '2x' },
       { type: 'ping' },
+      { type: 'start', recordingId: randomUUID(), speed: '2x', playbookId: randomUUID() },
+      { type: 'suggestionRendered', suggestionId: randomUUID(), renderDelayMs: 16 },
+      { type: 'feedback', suggestionId: randomUUID(), signal: 'used' },
     ];
     for (const m of msgs) expect(parseClientMessage(json(m))).toEqual({ ok: true, message: m });
   });
@@ -32,6 +35,19 @@ describe('parseClientMessage', () => {
     ['bad speed', { type: 'setSpeed', speed: '10x' }],
     ['negative position', { type: 'seek', positionMs: -1 }],
     ['non-uuid id', { type: 'resume', sessionId: 'abc' }],
+    [
+      'negative render delay',
+      { type: 'suggestionRendered', suggestionId: randomUUID(), renderDelayMs: -1 },
+    ],
+    [
+      'absurd render delay',
+      { type: 'suggestionRendered', suggestionId: randomUUID(), renderDelayMs: 600_000 },
+    ],
+    ['unknown feedback signal', { type: 'feedback', suggestionId: randomUUID(), signal: 'love' }],
+    [
+      'client-sent wall-clock time',
+      { type: 'suggestionRendered', suggestionId: randomUUID(), renderDelayMs: 5, renderedAt: 1 },
+    ],
   ])('rejects %s', (_label, msg) => {
     expect(parseClientMessage(json(msg)).ok).toBe(false);
   });
@@ -66,9 +82,29 @@ describe('parseServerMessage', () => {
       durationMs: 60000,
       timing: 'estimated',
       capabilities: { seek: true, speeds: ['1x', '2x', 'instant'] },
+      suggestions: { available: true, model: 'llama-3.1-8b-instant', playbook: 'Outbound' },
       ...env,
     };
     expect(parseServerMessage(json(session)).ok).toBe(true);
+  });
+
+  it('accepts the suggestion lifecycle messages', () => {
+    const s = randomUUID();
+    for (const m of [
+      { type: 'suggestionStarted', suggestionId: s, utteranceId: randomUUID() },
+      { type: 'suggestionToken', suggestionId: s, text: 'Ask what' },
+      {
+        type: 'suggestionCompleted',
+        suggestionId: s,
+        text: 'Ask what it costs.',
+        firstTokenMs: 310,
+        lastTokenMs: 540,
+      },
+      { type: 'suggestionDropped', suggestionId: s, reason: 'first_token_timeout' },
+      { type: 'feedbackSaved', suggestionId: s, signals: ['thumbs_up', 'used'] },
+    ]) {
+      expect(parseServerMessage(json({ ...m, ...env })).ok).toBe(true);
+    }
   });
 
   it('requires the envelope on every server message', () => {

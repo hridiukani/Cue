@@ -87,6 +87,7 @@ export function handleConnection(socket: SocketLike, deps: ConnectionDeps): void
       durationMs: next.info.durationMs,
       timing: next.info.timing,
       capabilities: next.capabilities,
+      suggestions: next.suggestionsInfo,
     });
   };
 
@@ -205,7 +206,11 @@ export function handleConnection(socket: SocketLike, deps: ConnectionDeps): void
     if (msg.type === 'play') current.play();
     else if (msg.type === 'pause') current.pause();
     else if (msg.type === 'setSpeed') current.setSpeed(msg.speed);
-    else await onSeek(uid, current, msg.positionMs);
+    else if (msg.type === 'seek') await onSeek(uid, current, msg.positionMs);
+    else {
+      // suggestionRendered / feedback: wired up with the suggestion engine.
+      fail('invalid_state', 'Suggestions are not available for this session.');
+    }
   };
 
   // Process messages one at a time, in order.
