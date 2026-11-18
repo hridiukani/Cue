@@ -14,6 +14,10 @@ export interface LlmRequest {
   maxTokens: number;
   temperature: number;
   stop?: string[];
+  /** Reasoning models only (e.g. openai/gpt-oss-*): how much hidden "thinking" to do. */
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  /** Reasoning models only: false keeps the hidden reasoning out of the stream. */
+  includeReasoning?: boolean;
 }
 
 export type LlmErrorKind = 'rate_limited' | 'http' | 'network' | 'bad_response' | 'aborted';
@@ -73,6 +77,10 @@ export class GroqClient implements LlmClient {
           max_completion_tokens: req.maxTokens,
           temperature: req.temperature,
           ...(req.stop ? { stop: req.stop } : {}),
+          ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
+          ...(req.includeReasoning === undefined
+            ? {}
+            : { include_reasoning: req.includeReasoning }),
         }),
       });
     } catch (err) {
@@ -88,7 +96,10 @@ export class GroqClient implements LlmClient {
             Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS,
         });
       }
-      throw new LlmError('http', `HTTP ${String(res.status)}`, { status: res.status });
+      // Include the provider's own message (e.g. "model ... does not exist") so logs say why.
+      throw new LlmError('http', `HTTP ${String(res.status)}${await providerMessage(res)}`, {
+        status: res.status,
+      });
     }
     if (!res.body) throw new LlmError('bad_response', 'response has no body');
 
@@ -138,6 +149,16 @@ function parseDelta(data: string): string | null {
   if (!parsed.success) throw new LlmError('bad_response', 'unexpected stream chunk');
   const content = parsed.data.choices[0]?.delta?.content;
   return content === undefined || content === null || content === '' ? null : content;
+}
+
+/** ": <message>" from an OpenAI-style error body, or '' if there isn't a readable one. */
+async function providerMessage(res: Response): Promise<string> {
+  try {
+    const parsed = StreamErrorSchema.safeParse(JSON.parse(await res.text()));
+    return parsed.success ? `: ${parsed.data.error.message.slice(0, 200)}` : '';
+  } catch {
+    return '';
+  }
 }
 
 function toLlmError(err: unknown, signal: AbortSignal): LlmError {

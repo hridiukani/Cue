@@ -150,4 +150,63 @@ describe('GroqClient', () => {
     expect(err).toBeInstanceOf(LlmError);
     expect(err).toMatchObject({ kind: 'aborted' });
   });
+
+  it('sends reasoning settings only when given (reasoning models)', async () => {
+    const bodies: unknown[] = [];
+    const client = new GroqClient({
+      apiKey: 'k',
+      baseUrl: 'http://x',
+      fetch: (_url, init) => {
+        bodies.push(JSON.parse(init.body as string));
+        return Promise.resolve(sse(['data: [DONE]\n\n']));
+      },
+    });
+    const drain = async (req: LlmRequest) => {
+      const out: string[] = [];
+      for await (const d of client.stream(req, new AbortController().signal)) out.push(d);
+      return out;
+    };
+    await drain(REQ);
+    await drain({
+      ...REQ,
+      model: 'openai/gpt-oss-20b',
+      maxTokens: 512,
+      reasoningEffort: 'low',
+      includeReasoning: false,
+    });
+    expect(bodies[0]).not.toHaveProperty('reasoning_effort');
+    expect(bodies[0]).not.toHaveProperty('include_reasoning');
+    expect(bodies[1]).toMatchObject({
+      model: 'openai/gpt-oss-20b',
+      max_completion_tokens: 512,
+      reasoning_effort: 'low',
+      include_reasoning: false,
+    });
+  });
+
+  it("puts the provider's error message in the error (e.g. unknown model)", async () => {
+    const client = new GroqClient({
+      apiKey: 'k',
+      baseUrl: 'http://x',
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: {
+                message:
+                  'The model `llama-3.1-8b-instant` does not exist or you do not have access to it.',
+                type: 'invalid_request_error',
+                code: 'model_not_found',
+              },
+            }),
+            { status: 404 },
+          ),
+        ),
+    });
+    await expect(collect(client)).rejects.toMatchObject({
+      kind: 'http',
+      opts: { status: 404 },
+      message: expect.stringContaining('does not exist') as unknown,
+    });
+  });
 });

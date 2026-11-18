@@ -2,7 +2,14 @@ import type { ServerMessageBody } from '@cue/shared';
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeClock } from '../clock';
-import { DEFAULT_SUGGESTION_CONFIG, SuggestionEngine, type SuggestionStore } from './engine';
+import {
+  DEFAULT_SUGGESTION_CONFIG,
+  isReasoningModel,
+  modelRequestSettings,
+  REASONING_MAX_TOKENS,
+  SuggestionEngine,
+  type SuggestionStore,
+} from './engine';
 import { LlmError, type LlmClient, type LlmRequest } from './llm';
 
 /**
@@ -359,4 +366,41 @@ describe('SuggestionEngine', () => {
     expect(req).toMatchObject({ model: 'llama-3.1-8b-instant', maxTokens: 48, stop: ['\n'] });
     expect(req?.messages.map((m) => m.role)).toEqual(['system', 'system', 'user']);
   });
+
+  it('gives reasoning models low effort, hidden reasoning and room to think', async () => {
+    engine = new SuggestionEngine({
+      llm,
+      clock,
+      store,
+      send: (b) => sent.push(b),
+      config: { ...DEFAULT_SUGGESTION_CONFIG, model: 'openai/gpt-oss-20b' },
+      playbook: null,
+    });
+    prospect();
+    await flush();
+    expect(llm.requests[0]?.req).toMatchObject({
+      model: 'openai/gpt-oss-20b',
+      maxTokens: REASONING_MAX_TOKENS,
+      reasoningEffort: 'low',
+      includeReasoning: false,
+    });
+  });
+});
+
+describe('modelRequestSettings', () => {
+  it('leaves non-reasoning models alone', () => {
+    expect(modelRequestSettings('llama-3.1-8b-instant', 48)).toEqual({ maxTokens: 48 });
+  });
+
+  it.each(['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'gpt-oss-20b'])(
+    'treats %s as a reasoning model',
+    (model) => {
+      expect(isReasoningModel(model)).toBe(true);
+      expect(modelRequestSettings(model, 48)).toEqual({
+        maxTokens: REASONING_MAX_TOKENS,
+        reasoningEffort: 'low',
+        includeReasoning: false,
+      });
+    },
+  );
 });
