@@ -6,7 +6,7 @@ import { TicketVerifier } from './auth/ticket-verifier';
 import { type Clock, realClock } from './clock';
 import type { RealtimeConfig } from './config';
 import { SessionManager } from './session/session-manager';
-import { GroqClient, type LlmClient } from './suggestions/llm';
+import { GroqClient, type LlmClient } from '@cue/suggest';
 import { handleConnection, type SocketLike } from './ws/connection';
 
 export interface ServerDeps {

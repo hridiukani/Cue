@@ -8,7 +8,7 @@ import WebSocket from 'ws';
 import type { Clock } from '../src/clock';
 import { loadConfig } from '../src/config';
 import { buildServer, type RealtimeServer } from '../src/server';
-import type { LlmClient } from '../src/suggestions/llm';
+import type { LlmClient } from '@cue/suggest';
 
 /** Shared helpers for the realtime integration tests. */
 

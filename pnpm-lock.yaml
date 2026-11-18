@@ -50,6 +50,9 @@ importers:
       '@cue/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@cue/suggest':
+        specifier: workspace:*
+        version: link:../../packages/suggest
       '@fastify/websocket':
         specifier: ^11.3.7
         version: 11.3.7
@@ -173,6 +176,15 @@ importers:
         version: 4.6.7
 
   packages/storage: {}
+
+  packages/suggest:
+    dependencies:
+      '@cue/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
 packages:
 

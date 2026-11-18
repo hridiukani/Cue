@@ -2,15 +2,8 @@ import type { ServerMessageBody } from '@cue/shared';
 import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FakeClock } from '../clock';
-import {
-  DEFAULT_SUGGESTION_CONFIG,
-  isReasoningModel,
-  modelRequestSettings,
-  REASONING_MAX_TOKENS,
-  SuggestionEngine,
-  type SuggestionStore,
-} from './engine';
-import { LlmError, type LlmClient, type LlmRequest } from './llm';
+import { LlmError, type LlmClient, type LlmRequest, REASONING_MAX_TOKENS } from '@cue/suggest';
+import { DEFAULT_SUGGESTION_CONFIG, SuggestionEngine, type SuggestionStore } from './engine';
 
 /**
  * Engine rules with fake time and a fake model: nothing touches the network
@@ -435,22 +428,4 @@ describe('SuggestionEngine', () => {
       includeReasoning: false,
     });
   });
-});
-
-describe('modelRequestSettings', () => {
-  it('leaves non-reasoning models alone', () => {
-    expect(modelRequestSettings('llama-3.1-8b-instant', 48)).toEqual({ maxTokens: 48 });
-  });
-
-  it.each(['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'gpt-oss-20b'])(
-    'treats %s as a reasoning model',
-    (model) => {
-      expect(isReasoningModel(model)).toBe(true);
-      expect(modelRequestSettings(model, 48)).toEqual({
-        maxTokens: REASONING_MAX_TOKENS,
-        reasoningEffort: 'low',
-        includeReasoning: false,
-      });
-    },
-  );
 });

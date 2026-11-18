@@ -24,8 +24,7 @@ import {
   SuggestionEngine,
   type SuggestionStore,
 } from '../suggestions/engine';
-import type { LlmClient } from '../suggestions/llm';
-import type { PlaybookForPrompt } from '../suggestions/prompt';
+import type { LlmClient, PlaybookForPrompt } from '@cue/suggest';
 import { ReplaySession, type SessionStore, utteranceSignature } from './replay-session';
 
 export const IDLE_SESSION_MS = 60 * 60 * 1000;

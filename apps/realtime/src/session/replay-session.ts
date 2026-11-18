@@ -2,7 +2,7 @@ import type { ServerMessageBody, SessionState, Speed } from '@cue/shared';
 import type { Clock, TimerHandle } from '../clock';
 import type { CallSource, SourceEvent } from '../sources/call-source';
 import type { SuggestionEngine } from '../suggestions/engine';
-import type { WindowUtterance } from '../suggestions/prompt';
+import type { WindowUtterance } from '@cue/suggest';
 import { BACKPRESSURE, shouldSend, slowClientAction } from './backpressure';
 
 /** Where a session's messages go: one browser socket (or nothing while disconnected). */
