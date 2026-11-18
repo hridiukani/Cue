@@ -1,0 +1,134 @@
+# @cue/evals: suggestion quality evals
+
+An offline harness that measures how **good** Cue's suggested lines are, not just how fast they arrive. It replays real moments from imported calls through the exact prompt, client and settings production uses (`@cue/suggest`), then scores each line twice:
+
+1. **Deterministic checks** (exact, free):
+   - at most 20 words before production's cut;
+   - one line;
+   - no preamble ("Rep:", "Sure! Here's…");
+   - no unfilled placeholders ("[Name]");
+   - no banned phrases.
+2. **An LLM judge**, a _different_ model from the one under test. It grades the line against the case's rubric on a 1–5 scale and gives a short rationale.
+
+Each case runs N times, so you can see how much the results vary.
+
+## Commands (PowerShell or bash)
+
+```sh
+pnpm eval                                   # all cases, 3 runs each, default model and prompt
+pnpm eval --model openai/gpt-oss-20b --prompt-version suggest-v1
+pnpm eval --smoke --runs 2                  # the small subset CI runs
+pnpm eval --category price_objection --runs 5
+pnpm eval compare previous latest           # diff two saved runs, regressions first
+pnpm eval candidates                        # propose new moments from your imported calls
+pnpm eval cases                             # validate dataset/cases.jsonl and summarise it
+pnpm eval --help
+```
+
+You need `GROQ_API_KEY` in `.env`. Cases from datasets without a license also need your local database with the calls imported (`docker compose up -d`, then `pnpm ingest -- --dataset real-sales`). Without them, those cases are skipped and listed as skipped.
+
+**How long it takes:** our Groq account allows 8,000 tokens per minute per model. A judge call uses about 1,500 tokens, so a full run (43 cases × 3 runs) takes roughly 25 minutes. The harness waits out rate limits (shown as `w` in the progress line) instead of failing runs.
+
+## What a run reports
+
+| Metric                | Meaning                                                                                                                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pass rate             | Share of generated lines that pass: every deterministic check, no "must not" violated, and a judge score ≥ 4. Errors count as failures.                                                                                                                 |
+| Mean score            | Mean judge score (1–5). An empty line scores 1.                                                                                                                                                                                                         |
+| Score spread          | Mean per-case standard deviation of the score across its N runs. A **flaky** case passed in some runs and failed in others.                                                                                                                             |
+| First token p50 / p95 | Time from request sent to the first visible token, measured by the harness against the real provider. Runs over production's 1.5 s deadline are counted. Excludes speech-to-text and the browser.                                                       |
+| Cost per 1,000        | For the model under test: real token counts (hidden reasoning included) × the prices in `src/pricing.ts`, with their source and date. A model with no listed price reports "unknown". Cached-input discounts aren't applied, so this is an upper bound. |
+
+Every run is saved to `results/<time>_<model>_<prompt-version>.json`. It records:
+
+- the git commit (and whether the tree had uncommitted changes);
+- the prompt version, judge model and judge version;
+- a hash of the case file and of each case's rubric;
+- every generated line with its checks, verdict, latency and token counts.
+
+`results/` is gitignored, because it holds model output generated from datasets that can't be redistributed. CI uploads its run as an artifact instead.
+
+**Comparing runs:** `compare` flags a case as regressed when:
+
+- its pass rate drops by ≥ 0.25 (one run of 3, or 1 of 4), or
+- its mean score drops by ≥ 0.5.
+
+A case whose rubric changed is shown as "rubric changed" and never counted as a regression. Changed settings (model, prompt, judge, N, case file) are listed at the top. With small N, one flipped run moves a case a lot, so look at the flaky column before trusting a single regression. Use `--fail-on-regression` to make it exit non-zero.
+
+## The dataset: `dataset/cases.jsonl`
+
+One case per line: a moment where the **prospect just spoke**, the conversation up to that line (at most 12 utterances, like production), the playbook to use, and a rubric. Lines starting with `//` are comments. `pnpm eval cases` validates every edit and reports problems with line numbers.
+
+```jsonc
+{
+  "id": "price-saas-34-cheaper-options",
+  "status": "DRAFT", // DRAFT until a person has reviewed the rubric, then REVIEWED
+  "category": "price_objection", // price_objection | send_email | stakeholder_approval | competitor | disengaged | buying_signal | vague_pain
+  "smoke": true, // part of the CI subset (needs an inline window)
+  "source": {
+    "dataset": "DeepMostInnovations/saas-sales-conversations",
+    "license": "apache-2.0",
+    "callId": "saas-7-conv-34", // the dataset's own id (recordings.external_id)
+    "utterances": [0, 10], // inclusive range; the last one is the prospect's line
+  },
+  "playbook": "testmaster", // a key in dataset/playbooks.json, or "none"
+  "window": ["Rep: …", "Prospect: …"], // null = loaded from your local DB (see Licenses)
+  "rubric": {
+    "must": ["Acknowledges that $5,000 a month is a big step for them", "…"],
+    "mustNot": ["Invents a cheaper plan, tier or discount"], // on top of the standard ones
+    "bannedPhrases": [], // exact phrases that fail the line
+  },
+  "notes": "",
+}
+```
+
+**Every rubric is checked against these standard "must not" rules, on top of its own:**
+
+- inventing features, prices, numbers, customers or facts;
+- arguing with or contradicting the prospect;
+- anything a rep couldn't say out loud on a live call.
+
+**There is no ground-truth "best line" in these datasets,** so rubrics are written by a person. All 43 current rubrics are **DRAFT**: written by Claude from the candidate moments, for you to review. Change a case to `REVIEWED` once you agree with it.
+
+**Playbooks** (`dataset/playbooks.json`, also DRAFT) are built only from facts stated in each dataset's own calls: TestMaster's $5,000 a month, its CI/CD integration, and so on. That way "invents features" can be judged against something concrete.
+
+**Adding cases:**
+
+1. `pnpm eval candidates` scans your imported calls for prospect lines with objection, email, approval, competitor, disengaged, buying-signal and vague-pain language. It takes the 12 utterances ending at that line as the window.
+2. It writes `candidates/candidates.md`, a readable review sheet, and `candidates/candidates.jsonl`, with one ready-to-edit case skeleton per moment. Both are gitignored, because they can contain windows from unlicensed datasets.
+3. Copy the good ones into `dataset/cases.jsonl` and write their rubrics.
+
+## Licenses
+
+Per-case license information is kept in each case's `source.license`. Current cases:
+
+| Dataset                                                                                                                      | License     | Cases | How the text is stored                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------- | ----- | ------------------------------------------------------------------------------------------------------- |
+| [gwenshap/sales-transcripts](https://huggingface.co/datasets/gwenshap/sales-transcripts)                                     | Apache-2.0  | 19    | Excerpts (≤ 12 utterances) inline in `cases.jsonl`                                                      |
+| [DeepMostInnovations/saas-sales-conversations](https://huggingface.co/datasets/DeepMostInnovations/saas-sales-conversations) | Apache-2.0  | 17    | Excerpts (≤ 12 utterances) inline in `cases.jsonl`                                                      |
+| [liva-ai/real-sales](https://huggingface.co/datasets/liva-ai/real-sales)                                                     | none stated | 7     | **Not stored.** Only call id + utterance range; the text is loaded from your local database at run time |
+
+**The Apache-2.0 excerpts** are redistributed under that license. They're unmodified except for being cut to the window, and the rubrics and playbooks are our own additions.
+
+**liva-ai/real-sales has no stated license,** so none of its text is copied into this repository: not windows, not matched phrases. The case schema refuses an inline window for a dataset whose license is `unspecified`. Its eval results stay in the gitignored `results/` folder. See [docs/datasets.md](../../docs/datasets.md).
+
+## CI
+
+`.github/workflows/eval-smoke.yml` runs `pnpm eval --smoke --runs 2` on every pull request. That's 8 inline cases (Apache-2.0 only, so no database is needed), and the job fails if the pass rate is below the repository variable `EVAL_MIN_PASS_RATE`.
+
+It needs the repository secret `GROQ_API_KEY`. Pull requests from forks don't get secrets, so for them the eval is skipped with a warning.
+
+The report is written to the job summary, and the run file is uploaded as an artifact.
+
+## Changing the prompt or the judge
+
+- **The suggestion prompt** lives in `packages/suggest/src/prompt.ts`. To change it, add a new entry to `SYSTEM_PROMPTS` with a new version, keep the old one, then compare the two:
+
+  ```sh
+  pnpm eval --prompt-version suggest-v1
+  pnpm eval --prompt-version suggest-v2
+  pnpm eval compare previous latest
+  ```
+
+- **The judge prompt** is `JUDGE_SYSTEM_PROMPT` in `src/judge.ts`. Changing it means bumping `JUDGE_VERSION`: scores from different judge versions aren't comparable, and `compare` says so.
+- **The default judge** is `openai/gpt-oss-120b`: a larger, different model from the default under test, and production-tier on Groq. It's from the same model family, which can bias it toward its sibling's style. To use another judge, pass `--judge-model` or set `EVAL_JUDGE_MODEL`. The harness refuses a judge that is the same model as the one under test.

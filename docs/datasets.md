@@ -80,6 +80,14 @@ None of the datasets above is gated today. If one becomes gated, or you add a ga
 
 Without access, the importer **skips that dataset** with a message that says which of these steps is missing, and imports the rest.
 
+## Use in the offline evals
+
+`packages/evals/dataset/cases.jsonl` holds eval cases built from moments in these calls. See `packages/evals/README.md`.
+
+- **gwenshap and SaaS (Apache-2.0):** short excerpts (at most 12 utterances) are stored inline under that license.
+- **real-sales (no license):** only a call id and an utterance range are stored, and the text is loaded from your local database at run time. The case schema refuses an inline window for a dataset whose license is `unspecified`.
+- **Eval results** (`packages/evals/results/`) and candidate sheets (`packages/evals/candidates/`) are gitignored.
+
 ## Storage
 
 Imported audio goes through the `BlobStore` interface (`packages/storage`). The only implementation today is `LocalFsBlobStore`, which writes to `BLOB_STORE_DIR` (default `./data/blobs`).

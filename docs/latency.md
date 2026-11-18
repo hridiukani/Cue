@@ -113,6 +113,12 @@ The visible line is still capped at 20 words, and generation stops as soon as it
 
 A single check on 2026-11-17 returned a full answer in about 300 ms. That's one request, not a latency result.
 
+## Latency in the offline evals
+
+`pnpm eval` (packages/evals) also reports first-token p50/p95. It measures from the moment the harness sends the request to the first visible token, against the real provider, for every generated line. Lines whose first token arrives after the 1.5 s deadline are counted.
+
+That's a different measurement from replay: there is no transcript emission, no database save and no browser. Report it as "model time to first token in the eval harness", never as end-to-end latency. Its cost-per-1,000 figure comes from the provider's own token counts, which include hidden reasoning tokens, multiplied by the prices in `packages/evals/src/pricing.ts`.
+
 ## Measured numbers
 
 Only record numbers measured against a **real** provider, with the date, model and sample size. Numbers from the mock model used in tests and local smoke checks (fixed delays) are not latency results.
