@@ -1,5 +1,6 @@
 import type { CompareResult } from './compare';
 import type { RunFile } from './results';
+import { UNGRADED_MAX_SHARE } from './summary';
 
 /** Plain-text tables for the terminal. ANSI colour only when asked (a TTY without NO_COLOR). */
 
@@ -45,6 +46,7 @@ export function table(rows: string[][], right: readonly number[] = []): string {
 }
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+const pctOrNone = (x: number | null) => (x === null ? 'n/a' : pct(x));
 const num = (x: number | null, digits = 2) => (x === null ? '–' : x.toFixed(digits));
 const ms = (x: number | null) => (x === null ? '–' : `${String(Math.round(x))} ms`);
 const usd = (x: number | null) =>
@@ -64,14 +66,31 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
     lines.push(style.yellow(`Skipped ${String(meta.skipped.length)} case(s):`));
     for (const sk of meta.skipped) lines.push(style.yellow(`  ${sk.caseId}: ${sk.reason}`));
   }
+  const ungradedCount = `${String(s.ungraded)} of ${String(s.runs)} runs (${pct(s.ungradedShare)})`;
+  const ungradedText = `Ungraded: ${ungradedCount}`;
+  if (s.ungraded > 0) {
+    lines.push('');
+    const over = s.ungradedShare > UNGRADED_MAX_SHARE;
+    const say = over ? (t: string) => style.red(style.bold(t)) : style.yellow;
+    lines.push(
+      say(
+        `${ungradedText}: the judge failed on them, so their outcome is unknown. They are excluded from the pass rate and mean score${over ? `, and more than ${pct(UNGRADED_MAX_SHARE)} ungraded makes this run untrustworthy. Grade them with: pnpm eval rejudge <this file>` : '.'}`,
+      ),
+    );
+  }
   lines.push('');
-  const passColor = s.passRate >= 0.8 ? style.green : s.passRate >= 0.6 ? style.yellow : style.red;
+  const pr = s.passRate ?? 0;
+  const passColor = pr >= 0.8 ? style.green : pr >= 0.6 ? style.yellow : style.red;
   lines.push(
     table([
       ['Metric', 'Value'],
       ['Cases / runs', `${String(s.cases)} / ${String(s.runs)}`],
-      ['Pass rate', passColor(`${pct(s.passRate)} (${String(s.passes)}/${String(s.runs)})`)],
-      ['Mean score', `${num(s.meanScore)} / 5`],
+      [
+        'Pass rate',
+        passColor(`${pctOrNone(s.passRate)} (${String(s.passes)}/${String(s.graded)} graded runs)`),
+      ],
+      ['Ungraded', s.ungraded > 0 ? style.red(ungradedCount) : '0'],
+      ['Mean score', `${num(s.meanScore)} / 5 (graded runs)`],
       [
         'Score spread',
         `σ ${num(s.meanCaseScoreStdDev)} per case · ${String(s.flakyCases)} flaky case(s)`,
@@ -86,7 +105,14 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
         'Cost per 1,000',
         `${usd(s.costPer1000Usd)} (model under test, ${String(s.costedRuns)} costed runs) · judge this run: ${usd(s.judgeCostUsd)}`,
       ],
-      ['Errors', s.errors > 0 ? style.red(String(s.errors)) : '0'],
+      [
+        'Errors',
+        s.errors > 0
+          ? style.red(
+              `${String(s.errors)} (model ${String(s.modelErrors)} · ungraded ${String(s.ungraded)})`,
+            )
+          : '0',
+      ],
     ]),
   );
   lines.push('');
@@ -94,12 +120,17 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
   lines.push(
     table(
       [
-        ['Category', 'Pass rate', 'Runs'],
+        ['Category', 'Pass rate', 'Graded', 'Ungraded'],
         ...Object.entries(s.byCategory)
           .sort(([x], [y]) => x.localeCompare(y))
-          .map(([cat, v]) => [cat, pct(v.passRate), String(v.runs)]),
+          .map(([cat, v]) => [
+            cat,
+            pctOrNone(v.passRate),
+            `${String(v.graded)}/${String(v.runs)}`,
+            String(v.ungraded),
+          ]),
       ],
-      [1, 2],
+      [1, 2, 3],
     ),
   );
   lines.push('');
@@ -111,15 +142,17 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
         ...run.cases.map((c) => {
           const reasons = c.runs.flatMap((r) => r.reasons);
           const top = mostCommon(reasons);
-          const pass = `${String(c.summary.passes)}/${String(c.summary.runs)}`;
+          const pass = `${String(c.summary.passes)}/${String(c.summary.graded)}${c.summary.ungraded > 0 ? ` (+${String(c.summary.ungraded)}?)` : ''}`;
           return [
             c.id,
             c.category,
-            c.summary.passes === c.summary.runs
-              ? style.green(pass)
-              : c.summary.passes === 0
-                ? style.red(pass)
-                : style.yellow(pass),
+            c.summary.graded === 0
+              ? style.dim(pass)
+              : c.summary.passes === c.summary.graded
+                ? style.green(pass)
+                : c.summary.passes === 0
+                  ? style.red(pass)
+                  : style.yellow(pass),
             num(c.summary.meanScore, 1),
             num(c.summary.scoreStdDev, 1),
             top ? style.dim(top.slice(0, 70)) : '',
@@ -262,7 +295,7 @@ export function formatCompare(r: CompareResult, style: Style = PLAIN): string {
           .map((c) => [
             c.id,
             c.category,
-            `${c.a ? pct(c.a.passRate) : '–'} → ${c.b ? pct(c.b.passRate) : '–'}`,
+            `${c.a ? pctOrNone(c.a.passRate) : '–'} → ${c.b ? pctOrNone(c.b.passRate) : '–'}`,
             `${num(c.a?.meanScore ?? null, 1)} → ${num(c.b?.meanScore ?? null, 1)}`,
             label[c.status] ?? c.status,
           ]),

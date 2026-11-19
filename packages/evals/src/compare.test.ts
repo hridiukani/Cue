@@ -57,7 +57,7 @@ describe('compareRuns', () => {
   it('does not compare a case where either run had a model or judge error', () => {
     const ungraded = fakeCase('a', 1, 3);
     const first = ungraded.runs[1];
-    if (first) Object.assign(first, { judgeError: 'judge HTTP 429', score: null, pass: false });
+    if (first) Object.assign(first, { judgeError: 'judge HTTP 429', verdict: null, score: null });
     const r = cmp(fakeRunFile([fakeCase('a', 3, 3)]), fakeRunFile([ungraded]));
     expect(statusOf(r, 'a')).toBe('errored');
     expect(r.regressions).toBe(0);

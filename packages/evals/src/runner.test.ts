@@ -11,6 +11,7 @@ import type { JudgeClient } from './judge';
 import { JudgeHttpError, STANDARD_MUST_NOT } from './judge';
 import type { ResolvedCase } from './resolve';
 import { backoffMs, FIRST_TOKEN_DEADLINE_MS, runCases, type RunnerDeps, Semaphore } from './runner';
+import { isUngraded } from './scoring';
 
 /** Fake time: the fake model moves it forward as it "streams". */
 class Clock {
@@ -249,6 +250,29 @@ describe('runCases', () => {
       ['judge', 7000],
       ['judge', 7000],
     ]);
+  });
+
+  it('records a run whose judge never answered as UNGRADED, keeping the line, latency and cost', async () => {
+    const clock = new Clock();
+    const limited = new JudgeHttpError(429, 'judge HTTP 429', 1000);
+    const judge = new FakeJudge([limited, limited, limited]);
+    const [r] = await runCases(
+      makeCases(1),
+      { ...OPTS, runsPerCase: 1, maxRetries: 2 },
+      deps(new FakeLlm(clock, [{}]), judge, clock),
+    );
+    const run = r?.runs[0];
+    expect(run).toMatchObject({
+      error: null,
+      judgeError: 'judge HTTP 429',
+      verdict: null,
+      pass: false,
+      score: null,
+      reasons: ['ungraded: judge HTTP 429'],
+    });
+    expect(run?.shown).not.toBe('');
+    expect(run?.firstTokenMs).not.toBeNull();
+    expect(run && isUngraded(run)).toBe(true);
   });
 
   it('keeps judge calls under judgeConcurrency, separately from generation', async () => {

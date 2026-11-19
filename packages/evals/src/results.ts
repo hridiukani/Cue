@@ -3,7 +3,13 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { CaseRecord, CaseSummary, RunSummary } from './summary';
+import {
+  type CaseRecord,
+  type CaseSummary,
+  type RunSummary,
+  summarizeCase,
+  summarizeRun,
+} from './summary';
 
 /**
  * Every eval run is saved as one JSON file in packages/evals/results/, named
@@ -39,6 +45,30 @@ export interface RunFile {
 
 // What compare and the report read back. Loose: extra fields are fine, missing ones aren't.
 const nullableNumber = z.number().nullable();
+const UsageSchema = z
+  .object({
+    promptTokens: z.number(),
+    completionTokens: z.number(),
+    reasoningTokens: nullableNumber,
+  })
+  .nullable();
+// The fields the summary is recomputed from (see loadRun).
+const RunRecordSchema = z
+  .object({
+    attempt: z.number(),
+    shown: z.string(),
+    error: z.string().nullable(),
+    judgeError: z.string().nullable(),
+    verdict: z.unknown(),
+    pass: z.boolean(),
+    score: nullableNumber,
+    reasons: z.array(z.string()),
+    firstTokenMs: nullableNumber,
+    overDeadline: z.boolean(),
+    usage: UsageSchema,
+    judgeUsage: UsageSchema,
+  })
+  .loose();
 const RunFileSchema = z
   .object({
     schemaVersion: z.literal(RESULTS_SCHEMA_VERSION),
@@ -60,7 +90,7 @@ const RunFileSchema = z
         cases: z.number(),
         runs: z.number(),
         passes: z.number(),
-        passRate: z.number(),
+        passRate: nullableNumber,
         meanScore: nullableNumber,
         flakyCases: z.number(),
         firstTokenMs: z.object({ count: z.number(), p50: z.number(), p95: z.number() }).nullable(),
@@ -73,8 +103,9 @@ const RunFileSchema = z
           id: z.string(),
           category: z.string(),
           rubricHash: z.string(),
+          runs: z.array(RunRecordSchema),
           summary: z
-            .object({ passRate: z.number(), meanScore: nullableNumber, flaky: z.boolean() })
+            .object({ passRate: nullableNumber, meanScore: nullableNumber, flaky: z.boolean() })
             .loose(),
         })
         .loose(),
@@ -109,8 +140,23 @@ export async function loadRun(file: string): Promise<RunFile> {
   if (!parsed.success) {
     throw new Error(`${file} is not an eval run file:\n${z.prettifyError(parsed.error)}`);
   }
-  // Validated where compare and the report read it; the rest is passed through.
-  return json as RunFile;
+  // Validated where compare, the report and the summary read it; the rest is passed through.
+  return withFreshSummaries(json as RunFile);
+}
+
+/**
+ * Recompute every summary from the runs, which are the source of truth. Files
+ * saved before a counting rule changed (e.g. before ungraded runs were
+ * excluded from the pass rate) are then read with today's rules, so two runs
+ * are never compared under different rules.
+ */
+export function withFreshSummaries(run: RunFile): RunFile {
+  const models = { model: run.meta.model, judgeModel: run.meta.judgeModel };
+  return {
+    ...run,
+    summary: summarizeRun(run.cases, models),
+    cases: run.cases.map((c) => ({ ...c, summary: summarizeCase(c) })),
+  };
 }
 
 /** Saved runs, oldest first (file names start with their timestamp). */

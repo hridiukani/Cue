@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { costUsd, priceOf } from './pricing';
-import { type CaseRecord, type RunRecord, summarizeCase, summarizeRun } from './summary';
+import {
+  type CaseRecord,
+  type RunRecord,
+  runProblems,
+  summarizeCase,
+  summarizeRun,
+  tooManyUngraded,
+  UNGRADED_MAX_SHARE,
+} from './summary';
 
 function run(over: Partial<RunRecord> = {}): RunRecord {
   return {
@@ -9,7 +17,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     shown: 'line',
     words: 1,
     checks: [],
-    verdict: null,
+    verdict: { mustMet: [true], mustNotViolated: [false, false, false], score: 4, rationale: 'ok' },
     judgeError: null,
     error: null,
     pass: true,
@@ -36,6 +44,10 @@ function kase(id: string, runs: RunRecord[], category = 'price_objection'): Case
   };
 }
 
+/** The judge returned 429: a line exists, but no verdict. */
+const ungradedRun = () =>
+  run({ verdict: null, judgeError: 'judge HTTP 429', pass: false, score: null });
+
 const MODELS = { model: 'openai/gpt-oss-20b', judgeModel: 'openai/gpt-oss-120b' };
 
 describe('summarizeCase', () => {
@@ -58,9 +70,42 @@ describe('summarizeCase', () => {
     );
   });
 
-  it('leaves ungraded runs out of the mean but counts them as runs', () => {
-    const s = summarizeCase(kase('a', [run({ score: null, pass: false, error: 'x' }), run()]));
-    expect(s).toMatchObject({ runs: 2, passes: 1, meanScore: 4, errors: 1 });
+  it('counts a model error as a graded failure (the rep got nothing)', () => {
+    const s = summarizeCase(
+      kase('a', [run({ score: null, pass: false, error: 'x', verdict: null, shown: '' }), run()]),
+    );
+    expect(s).toMatchObject({
+      runs: 2,
+      graded: 2,
+      ungraded: 0,
+      passes: 1,
+      passRate: 0.5,
+      meanScore: 4,
+      errors: 1,
+      modelErrors: 1,
+    });
+  });
+
+  it('leaves an ungraded run out of the pass rate and mean, but counts it as an error', () => {
+    const s = summarizeCase(
+      kase('a', [ungradedRun(), run({ score: 5 }), run({ score: 3, pass: false })]),
+    );
+    expect(s).toMatchObject({
+      runs: 3,
+      graded: 2,
+      ungraded: 1,
+      passes: 1,
+      passRate: 0.5,
+      meanScore: 4,
+      errors: 1,
+      modelErrors: 0,
+      flaky: true,
+    });
+  });
+
+  it('has no pass rate when nothing was graded (not 0%)', () => {
+    const s = summarizeCase(kase('a', [ungradedRun(), ungradedRun()]));
+    expect(s).toMatchObject({ graded: 0, passRate: null, meanScore: null, flaky: false });
   });
 });
 
@@ -92,8 +137,8 @@ describe('summarizeRun', () => {
     });
     expect(s.meanCaseScoreStdDev).toBeCloseTo((0 + 1) / 2);
     expect(s.byCategory).toEqual({
-      price_objection: { runs: 2, passes: 2, passRate: 1 },
-      buying_signal: { runs: 2, passes: 1, passRate: 0.5 },
+      price_objection: { runs: 2, graded: 2, ungraded: 0, passes: 2, passRate: 1 },
+      buying_signal: { runs: 2, graded: 2, ungraded: 0, passes: 1, passRate: 0.5 },
     });
   });
 
@@ -129,6 +174,84 @@ describe('summarizeRun', () => {
       MODELS,
     );
     expect(s).toMatchObject({ passRate: 0, meanScore: null, firstTokenMs: null, errors: 1 });
+  });
+
+  it('excludes ungraded runs from the pass rate, reports them, and flags more than 5%', () => {
+    // The 2026-11-19 bug: 78 of 129 runs ungraded, counted as failures, read 14.7%.
+    const s = summarizeRun(
+      [
+        kase('a', [run(), ungradedRun(), ungradedRun()]),
+        kase('b', [run(), run({ pass: false, score: 2 }), ungradedRun()], 'buying_signal'),
+      ],
+      MODELS,
+    );
+    expect(s).toMatchObject({
+      runs: 6,
+      graded: 3,
+      ungraded: 3,
+      ungradedShare: 0.5,
+      passes: 2,
+      errors: 3,
+      modelErrors: 0,
+    });
+    expect(s.passRate).toBeCloseTo(2 / 3); // not 2/6
+    expect(s.meanScore).toBeCloseTo(10 / 3);
+    expect(s.byCategory.price_objection).toEqual({
+      runs: 3,
+      graded: 1,
+      ungraded: 2,
+      passes: 1,
+      passRate: 1,
+    });
+    expect(tooManyUngraded(s)).toBe(true);
+  });
+
+  it('allows up to 5% ungraded (the boundary is exclusive)', () => {
+    const twenty = (ungraded: number) =>
+      summarizeRun(
+        [
+          kase(
+            'a',
+            Array.from({ length: 20 }, (_, i) => (i < ungraded ? ungradedRun() : run())),
+          ),
+        ],
+        MODELS,
+      );
+    expect(twenty(1).ungradedShare).toBe(UNGRADED_MAX_SHARE);
+    expect(tooManyUngraded(twenty(1))).toBe(false);
+    expect(tooManyUngraded(twenty(2))).toBe(true);
+    expect(tooManyUngraded(twenty(0))).toBe(false);
+  });
+
+  it('makes pnpm eval fail when more than 5% of runs are ungraded, or the pass rate is low', () => {
+    const base = { runs: 100, ungraded: 0, ungradedShare: 0, passRate: 0.5 };
+    const opts = { minPassRate: null, file: 'results/x.json' };
+    expect(runProblems(base, opts)).toEqual([]);
+    expect(runProblems({ ...base, ungraded: 5, ungradedShare: 0.05 }, opts)).toEqual([]);
+    const [problem] = runProblems({ ...base, ungraded: 6, ungradedShare: 0.06 }, opts);
+    expect(problem).toBe(
+      '6 of 100 runs (6.0%) are ungraded, more than the 5.0% allowed: the pass rate is not trustworthy. Grade them with: pnpm eval rejudge results/x.json',
+    );
+    expect(runProblems(base, { ...opts, minPassRate: 0.6 })).toEqual([
+      'Pass rate 50.0% is below the threshold of 60.0%.',
+    ]);
+    // Nothing graded: no pass rate, which fails any threshold, and too many ungraded.
+    expect(
+      runProblems(
+        { runs: 3, ungraded: 3, ungradedShare: 1, passRate: null },
+        {
+          ...opts,
+          minPassRate: 0,
+        },
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('still counts the latency and cost of ungraded runs (the model did run)', () => {
+    const s = summarizeRun([kase('a', [ungradedRun()])], MODELS);
+    expect(s.firstTokenMs?.count).toBe(1);
+    expect(s.costedRuns).toBe(1);
+    expect(s.passRate).toBeNull();
   });
 });
 

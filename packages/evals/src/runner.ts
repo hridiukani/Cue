@@ -224,7 +224,8 @@ async function runOnce(
   const score = scoreRun({
     checks,
     verdict: graded.verdict,
-    error: gen.error ?? (graded.error ? `judge: ${graded.error}` : null),
+    error: gen.error,
+    judgeError: graded.error,
   });
   return {
     attempt,

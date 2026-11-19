@@ -22,7 +22,8 @@ import { COLOR, formatCompare, formatRun, PLAIN } from './report';
 import { type LoadUtterances, parsePlaybooks, resolveCase, type ResolvedCase } from './resolve';
 import { gitInfo, loadRun, resolveRunRef, type RunFile, saveRun } from './results';
 import { runCases } from './runner';
-import { summarizeCase, summarizeRun } from './summary';
+import { isUngraded } from './scoring';
+import { runProblems, summarizeCase, summarizeRun } from './summary';
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, '../..');
@@ -193,7 +194,8 @@ async function cmdRun(argv: string[]): Promise<number> {
         onRateLimited: () => process.stdout.write('w'),
         onRunDone: (_id, run) => {
           done++;
-          process.stdout.write(run.error ? 'E' : run.pass ? '.' : 'F');
+          // E = model error, U = ungraded (the judge failed), F = graded fail.
+          process.stdout.write(run.error ? 'E' : isUngraded(run) ? 'U' : run.pass ? '.' : 'F');
           if (done % 60 === 0 || done === total)
             process.stdout.write(` ${String(done)}/${String(total)}\n`);
         },
@@ -240,16 +242,17 @@ async function cmdRun(argv: string[]): Promise<number> {
         `### Suggestion eval\n\n\`\`\`text\n${formatRun(run)}\n\`\`\`\n`,
       );
     }
-    if (minPassRate !== null && run.summary.passRate < minPassRate) {
-      console.error(
-        `\nPass rate ${(run.summary.passRate * 100).toFixed(1)}% is below the threshold of ${(minPassRate * 100).toFixed(1)}%.`,
-      );
-      return 1;
-    }
-    return 0;
+    return reportProblems(
+      runProblems(run.summary, { minPassRate, file: path.relative(process.cwd(), file) }),
+    );
   } finally {
     await conn?.close();
   }
+}
+
+function reportProblems(problems: readonly string[]): number {
+  for (const p of problems) console.error(`\n${p}`);
+  return problems.length > 0 ? 1 : 0;
 }
 
 // ------------------------------------------------------------------ compare

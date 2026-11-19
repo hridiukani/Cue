@@ -9,7 +9,7 @@ export function fakeRun(over: Partial<RunRecord> = {}): RunRecord {
     shown: 'What would it cost to keep doing this by hand?',
     words: 11,
     checks: [],
-    verdict: null,
+    verdict: { mustMet: [true], mustNotViolated: [false, false, false], score: 4, rationale: 'ok' },
     judgeError: null,
     error: null,
     pass: true,

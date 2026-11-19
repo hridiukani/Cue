@@ -1,4 +1,5 @@
 import type { RunFile } from './results';
+import { isUngraded } from './scoring';
 
 /**
  * Diff two eval runs (A = before, B = after) case by case.
@@ -27,8 +28,8 @@ export interface CaseDiff {
   id: string;
   category: string;
   status: CaseDiffStatus;
-  a: { passRate: number; meanScore: number | null; flaky: boolean } | null;
-  b: { passRate: number; meanScore: number | null; flaky: boolean } | null;
+  a: { passRate: number | null; meanScore: number | null; flaky: boolean } | null;
+  b: { passRate: number | null; meanScore: number | null; flaky: boolean } | null;
   passRateDelta: number | null;
   scoreDelta: number | null;
 }
@@ -81,9 +82,9 @@ function settingsChanged(a: RunFile['meta'], b: RunFile['meta']): string[] {
   return out;
 }
 
-/** Runs of this case where the model or the judge failed (not a quality signal). */
+/** Runs of this case where the model failed or the run is ungraded (not a quality signal). */
 function erroredRuns(c: RunFile['cases'][number]): number {
-  return c.runs.filter((r) => r.error !== null || r.judgeError !== null).length;
+  return c.runs.filter((r) => r.error !== null || isUngraded(r)).length;
 }
 
 export function compareRuns(
@@ -111,7 +112,10 @@ export function compareRuns(
         scoreDelta: null,
       };
     }
-    const passRateDelta = y.summary.passRate - x.summary.passRate;
+    const passRateDelta =
+      x.summary.passRate !== null && y.summary.passRate !== null
+        ? y.summary.passRate - x.summary.passRate
+        : null;
     const scoreDelta =
       x.summary.meanScore !== null && y.summary.meanScore !== null
         ? y.summary.meanScore - x.summary.meanScore
@@ -125,10 +129,10 @@ export function compareRuns(
     }
     const eps = 1e-9; // 2/3 - 1 must count as a full 1/3 drop
     const regressed =
-      passRateDelta <= -REGRESSION_PASS_DROP + eps ||
+      (passRateDelta !== null && passRateDelta <= -REGRESSION_PASS_DROP + eps) ||
       (scoreDelta !== null && scoreDelta <= -REGRESSION_SCORE_DROP + eps);
     const improved =
-      passRateDelta >= REGRESSION_PASS_DROP - eps ||
+      (passRateDelta !== null && passRateDelta >= REGRESSION_PASS_DROP - eps) ||
       (scoreDelta !== null && scoreDelta >= REGRESSION_SCORE_DROP - eps);
     return {
       ...base,

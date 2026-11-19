@@ -3,6 +3,7 @@ import type { CheckResult } from './checks';
 import type { JudgeVerdict } from './judge';
 import { percentile } from './latency';
 import { costUsd } from './pricing';
+import { isUngraded } from './scoring';
 
 /** One generation of one case, with everything needed to audit its score later. */
 export interface RunRecord {
@@ -41,26 +42,42 @@ export interface CaseSummary {
   id: string;
   category: string;
   runs: number;
+  /** Runs with a known outcome: every run except the ungraded ones (model errors are graded failures). */
+  graded: number;
+  /** The judge failed, so the outcome is unknown. Excluded from passRate and meanScore. */
+  ungraded: number;
   passes: number;
-  passRate: number;
+  /** passes / graded; null when no run was graded. */
+  passRate: number | null;
   meanScore: number | null;
   /** Spread of the score across this case's N runs (population std dev). */
   scoreStdDev: number | null;
-  /** Some runs passed and some failed: the result depends on luck. */
+  /** Some graded runs passed and some failed: the result depends on luck. */
   flaky: boolean;
+  /** modelErrors + ungraded. */
   errors: number;
+  modelErrors: number;
 }
 
 export interface RunSummary {
   cases: number;
   runs: number;
+  /** Runs with a known outcome (see CaseSummary.graded). The pass rate's denominator. */
+  graded: number;
+  /** Runs the judge failed to grade. Excluded from passRate and meanScore. */
+  ungraded: number;
+  /** ungraded / runs. Above UNGRADED_MAX_SHARE the run is not trustworthy. */
+  ungradedShare: number;
   passes: number;
-  passRate: number;
+  /** passes / graded; null when nothing was graded. */
+  passRate: number | null;
   meanScore: number | null;
   /** Mean of the per-case score std devs: how much a single run's score varies. */
   meanCaseScoreStdDev: number | null;
   flakyCases: number;
+  /** modelErrors + ungraded. */
   errors: number;
+  modelErrors: number;
   firstTokenMs: { count: number; p50: number; p95: number } | null;
   overDeadline: number;
   /** Model under test only. null if its price or usage is unknown. */
@@ -68,7 +85,44 @@ export interface RunSummary {
   /** Runs whose cost is in costPer1000Usd (it's an average over these). */
   costedRuns: number;
   judgeCostUsd: number | null;
-  byCategory: Record<string, { runs: number; passes: number; passRate: number }>;
+  byCategory: Record<
+    string,
+    { runs: number; graded: number; ungraded: number; passes: number; passRate: number | null }
+  >;
+}
+
+/**
+ * More than this share of ungraded runs makes a run untrustworthy: `pnpm eval`
+ * exits non-zero, and `pnpm eval rejudge <file>` can grade the rest.
+ */
+export const UNGRADED_MAX_SHARE = 0.05;
+
+export function tooManyUngraded(s: Pick<RunSummary, 'ungradedShare'>): boolean {
+  return s.ungradedShare > UNGRADED_MAX_SHARE;
+}
+
+/**
+ * Why `pnpm eval` should exit non-zero (empty = success): more than
+ * UNGRADED_MAX_SHARE of the runs are ungraded, or the pass rate is below
+ * --min-pass-rate (a missing pass rate is below any threshold).
+ */
+export function runProblems(
+  s: Pick<RunSummary, 'runs' | 'ungraded' | 'ungradedShare' | 'passRate'>,
+  opts: { minPassRate: number | null; file: string },
+): string[] {
+  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const problems: string[] = [];
+  if (tooManyUngraded(s)) {
+    problems.push(
+      `${String(s.ungraded)} of ${String(s.runs)} runs (${pct(s.ungradedShare)}) are ungraded, more than the ${pct(UNGRADED_MAX_SHARE)} allowed: the pass rate is not trustworthy. Grade them with: pnpm eval rejudge ${opts.file}`,
+    );
+  }
+  if (opts.minPassRate !== null && (s.passRate === null || s.passRate < opts.minPassRate)) {
+    problems.push(
+      `Pass rate ${s.passRate === null ? 'n/a' : pct(s.passRate)} is below the threshold of ${pct(opts.minPassRate)}.`,
+    );
+  }
+  return problems;
 }
 
 const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -79,18 +133,24 @@ function stdDev(xs: readonly number[]): number {
 }
 
 export function summarizeCase(c: CaseRecord): CaseSummary {
-  const scores = c.runs.map((r) => r.score).filter((s): s is number => s !== null);
-  const passes = c.runs.filter((r) => r.pass).length;
+  const graded = c.runs.filter((r) => !isUngraded(r));
+  const scores = graded.map((r) => r.score).filter((s): s is number => s !== null);
+  const passes = graded.filter((r) => r.pass).length;
+  const ungraded = c.runs.length - graded.length;
+  const modelErrors = c.runs.filter((r) => r.error !== null).length;
   return {
     id: c.id,
     category: c.category,
     runs: c.runs.length,
+    graded: graded.length,
+    ungraded,
     passes,
-    passRate: c.runs.length > 0 ? passes / c.runs.length : 0,
+    passRate: graded.length > 0 ? passes / graded.length : null,
     meanScore: scores.length > 0 ? mean(scores) : null,
     scoreStdDev: scores.length > 0 ? stdDev(scores) : null,
-    flaky: passes > 0 && passes < c.runs.length,
-    errors: c.runs.filter((r) => r.error !== null).length,
+    flaky: passes > 0 && passes < graded.length,
+    errors: modelErrors + ungraded,
+    modelErrors,
   };
 }
 
@@ -99,8 +159,9 @@ export function summarizeRun(
   models: { model: string; judgeModel: string },
 ): RunSummary {
   const all = cases.flatMap((c) => c.runs);
+  const graded = all.filter((r) => !isUngraded(r));
   const perCase = cases.map(summarizeCase);
-  const scores = all.map((r) => r.score).filter((s): s is number => s !== null);
+  const scores = graded.map((r) => r.score).filter((s): s is number => s !== null);
   const caseSpreads = perCase
     .filter((c) => c.runs > 1)
     .map((c) => c.scoreStdDev)
@@ -118,22 +179,37 @@ export function summarizeRun(
 
   const byCategory: RunSummary['byCategory'] = {};
   for (const c of cases) {
-    const entry = (byCategory[c.category] ??= { runs: 0, passes: 0, passRate: 0 });
+    const entry = (byCategory[c.category] ??= {
+      runs: 0,
+      graded: 0,
+      ungraded: 0,
+      passes: 0,
+      passRate: null,
+    });
+    const g = c.runs.filter((r) => !isUngraded(r));
     entry.runs += c.runs.length;
-    entry.passes += c.runs.filter((r) => r.pass).length;
+    entry.graded += g.length;
+    entry.ungraded += c.runs.length - g.length;
+    entry.passes += g.filter((r) => r.pass).length;
   }
-  for (const e of Object.values(byCategory)) e.passRate = e.runs > 0 ? e.passes / e.runs : 0;
+  for (const e of Object.values(byCategory)) e.passRate = e.graded > 0 ? e.passes / e.graded : null;
 
-  const passes = all.filter((r) => r.pass).length;
+  const passes = graded.filter((r) => r.pass).length;
+  const ungraded = all.length - graded.length;
+  const modelErrors = all.filter((r) => r.error !== null).length;
   return {
     cases: cases.length,
     runs: all.length,
+    graded: graded.length,
+    ungraded,
+    ungradedShare: all.length > 0 ? ungraded / all.length : 0,
     passes,
-    passRate: all.length > 0 ? passes / all.length : 0,
+    passRate: graded.length > 0 ? passes / graded.length : null,
     meanScore: scores.length > 0 ? mean(scores) : null,
     meanCaseScoreStdDev: caseSpreads.length > 0 ? mean(caseSpreads) : null,
     flakyCases: perCase.filter((c) => c.flaky).length,
-    errors: all.filter((r) => r.error !== null).length,
+    errors: modelErrors + ungraded,
+    modelErrors,
     firstTokenMs:
       latencies.length > 0
         ? {
