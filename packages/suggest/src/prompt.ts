@@ -30,12 +30,41 @@ Rules:
 - Match the playbook's tone notes when given.`;
 
 /**
+ * suggest-v2 fixes the two defects the first eval baseline found (2026-11-18,
+ * 43 cases × 3):
+ * - 19 of 129 lines ran past 20 words, so production cut them mid-sentence:
+ *   the limit now comes FIRST, with a word-count self-check (gpt-oss reasons
+ *   in hidden tokens before answering, so it can actually count);
+ * - price objections passed 0%: the line jumped to a question without
+ *   acknowledging the concern. v2 says to acknowledge first, then redirect.
+ * Registered for evals; production stays on PROMPT_VERSION until compare
+ * shows v2 is better.
+ */
+export const PROMPT_VERSION_V2 = 'suggest-v2';
+
+export const SYSTEM_PROMPT_V2 = `HARD LIMIT: the line you write is at most ${String(MAX_SUGGESTION_WORDS)} words. Anything longer is cut off mid-sentence on the rep's screen.
+
+You are Cue, a real-time coach whispering to a sales rep during a live call.
+The prospect just finished speaking. Write the ONE next line the rep should say.
+
+Rules:
+- Output only the line itself: no preamble, no quotes, no labels, no explanation.
+- Plain spoken English the rep can say verbatim: one sentence, or a short acknowledgement plus one question.
+- If the prospect raised a concern or objection (price, cost, budget, timing, risk, an existing tool), FIRST acknowledge it in a few words, in their terms, THEN redirect: a short question, or the playbook's good response in your own words. Never skip, dismiss or argue with the concern.
+- Otherwise respond to what the prospect actually just said. Prefer a short, specific question that moves the deal forward.
+- Never invent facts, prices, discounts, features or customer names that aren't in the playbook or the conversation.
+- Match the playbook's tone notes when given.
+
+Before you answer, count the words in your line. If there are more than ${String(MAX_SUGGESTION_WORDS)}, shorten it until there are ${String(MAX_SUGGESTION_WORDS)} or fewer.`;
+
+/**
  * Every system prompt by version. When SYSTEM_PROMPT changes, add the new
  * version here and keep the old entry, so `pnpm eval --prompt-version <old>`
  * can still compare it with the new one.
  */
 export const SYSTEM_PROMPTS: Readonly<Record<string, string>> = {
   [PROMPT_VERSION]: SYSTEM_PROMPT,
+  [PROMPT_VERSION_V2]: SYSTEM_PROMPT_V2,
 };
 
 export function isKnownPromptVersion(version: string): boolean {

@@ -8,11 +8,13 @@ import {
   MAX_SUGGESTION_WORDS,
   PROMPT_VERSION,
   PROMPT_VERSION_NO_PLAYBOOK,
+  PROMPT_VERSION_V2,
   type PlaybookForPrompt,
   renderPlaybook,
   slidingWindow,
   stripSuggestion,
   SYSTEM_PROMPT,
+  SYSTEM_PROMPT_V2,
   SYSTEM_PROMPTS,
   type WindowUtterance,
   WINDOW_SIZE,
@@ -86,7 +88,40 @@ describe('buildSuggestionMessages', () => {
     expect(isKnownPromptVersion('toString')).toBe(false); // not fooled by Object.prototype
     expect(() =>
       buildSuggestionMessages({ playbook: null, history: history(1), promptVersion: 'nope' }),
-    ).toThrow(/Unknown prompt version "nope"\. Known: suggest-v1/);
+    ).toThrow(/Unknown prompt version "nope"\. Known: suggest-v1, suggest-v2/);
+  });
+
+  it('keeps suggest-v1 byte-identical while adding suggest-v2 (old runs stay reproducible)', () => {
+    expect(PROMPT_VERSION).toBe('suggest-v1'); // production moves only after an eval compare
+    expect(Object.keys(SYSTEM_PROMPTS)).toEqual(['suggest-v1', 'suggest-v2']);
+    expect(SYSTEM_PROMPTS['suggest-v1']).toBe(SYSTEM_PROMPT);
+    expect(SYSTEM_PROMPTS[PROMPT_VERSION_V2]).toBe(SYSTEM_PROMPT_V2);
+  });
+
+  it('suggest-v2 states the word limit first and asks for a word-count self-check', () => {
+    const firstLine = SYSTEM_PROMPT_V2.split('\n')[0] ?? '';
+    expect(firstLine).toMatch(
+      new RegExp(`^HARD LIMIT: .*at most ${String(MAX_SUGGESTION_WORDS)} words`),
+    );
+    expect(SYSTEM_PROMPT_V2.trimEnd().split('\n').at(-1)).toMatch(/count the words in your line/);
+    expect(SYSTEM_PROMPT_V2).toMatch(/FIRST acknowledge it .* THEN redirect/);
+  });
+
+  it('builds suggest-v2 messages in the same cache-friendly order, with or without a playbook', () => {
+    const withPlaybook = buildSuggestionMessages({
+      playbook: PLAYBOOK,
+      history: history(3),
+      promptVersion: PROMPT_VERSION_V2,
+    });
+    expect(withPlaybook.promptVersion).toBe('suggest-v2');
+    expect(withPlaybook.messages[0]?.content).toBe(SYSTEM_PROMPT_V2);
+    expect(withPlaybook.messages.map((m) => m.role)).toEqual(['system', 'system', 'user']);
+    const without = buildSuggestionMessages({
+      playbook: null,
+      history: history(3),
+      promptVersion: PROMPT_VERSION_V2,
+    });
+    expect(without.promptVersion).toBe('suggest-v2/no-playbook');
   });
 });
 
