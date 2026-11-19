@@ -131,8 +131,35 @@ export function parseVerdict(
 
 // ------------------------------------------------------------------ client
 
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
+/**
+ * How the judge model is asked. Stored with every graded run: a verdict from
+ * low reasoning effort isn't guaranteed to match one from medium, so reports
+ * and compare say when runs were graded with different settings.
+ */
+export interface JudgeSettings {
+  /** Sent only to reasoning models (gpt-oss); other models ignore it. */
+  reasoningEffort: ReasoningEffort;
+  /** Counts hidden reasoning too; providers count this cap against tokens-per-minute limits. */
+  maxCompletionTokens: number;
+}
+
+/** `pnpm eval`. The largest judge reply seen at medium effort was 656 tokens. */
+export const DEFAULT_JUDGE_SETTINGS: JudgeSettings = {
+  reasoningEffort: 'medium',
+  maxCompletionTokens: 1024,
+};
+
+/** `pnpm eval rejudge`: fewer tokens per call, so more calls fit under the provider's token limits. */
+export const REJUDGE_SETTINGS: JudgeSettings = { reasoningEffort: 'low', maxCompletionTokens: 512 };
+
+export const judgeSettingsKey = (s: JudgeSettings): string =>
+  `${s.reasoningEffort}/${String(s.maxCompletionTokens)}`;
+
 export interface JudgeClient {
   readonly model: string;
+  readonly settings: JudgeSettings;
   complete(messages: ChatMessage[]): Promise<{ text: string; usage: TokenUsage | null }>;
 }
 
@@ -155,11 +182,105 @@ const CompletionSchema = z.object({
     .nullish(),
 });
 
+// ------------------------------------------------------------------ rate limits
+
+export type RateLimitKind =
+  'requests per minute' | 'requests per day' | 'tokens per minute' | 'tokens per day' | 'unknown';
+
+/** What a 429 said about which limit was hit, from its headers and body. */
+export interface RateLimitInfo {
+  kind: RateLimitKind;
+  /** The provider's own message, with the organization id removed. */
+  message: string | null;
+  retryAfterMs: number | null;
+  /**
+   * Groq's x-ratelimit-* headers: "requests" is the per-day request limit and
+   * "tokens" the per-minute token limit. A per-day TOKEN limit has no header;
+   * only the message names it.
+   */
+  headers: {
+    limitRequests: string | null;
+    remainingRequests: string | null;
+    resetRequests: string | null;
+    limitTokens: string | null;
+    remainingTokens: string | null;
+    resetTokens: string | null;
+  };
+}
+
+const ErrorBodySchema = z.object({
+  error: z.object({ message: z.string() }).loose(),
+});
+
+const KIND_BY_CODE: Record<string, RateLimitKind> = {
+  RPM: 'requests per minute',
+  RPD: 'requests per day',
+  TPM: 'tokens per minute',
+  TPD: 'tokens per day',
+};
+
+/** "1m26.4s", "7.66s", "2h3m", "450ms" → ms (null if unreadable). */
+export function parseDuration(text: string): number | null {
+  const t = text.trim();
+  let total = 0;
+  let matched = '';
+  for (const m of t.matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g)) {
+    const n = Number(m[1]);
+    const unit = m[2];
+    total += unit === 'h' ? n * 3_600_000 : unit === 'm' ? n * 60_000 : unit === 's' ? n * 1000 : n;
+    matched += m[0];
+  }
+  return matched.length > 0 && matched === t ? Math.round(total) : null;
+}
+
+export function parseRateLimit(headers: Headers, bodyText: string): RateLimitInfo {
+  let message: string | null = null;
+  try {
+    const body = ErrorBodySchema.safeParse(JSON.parse(bodyText));
+    if (body.success) message = body.data.error.message;
+  } catch {
+    // Not JSON: go by the headers alone.
+  }
+  // Never keep account identifiers in result files or logs.
+  message = message?.replace(/\borg_[A-Za-z0-9]+/g, 'org_…').slice(0, 400) ?? null;
+  const h = (name: string) => headers.get(name);
+  const info: RateLimitInfo['headers'] = {
+    limitRequests: h('x-ratelimit-limit-requests'),
+    remainingRequests: h('x-ratelimit-remaining-requests'),
+    resetRequests: h('x-ratelimit-reset-requests'),
+    limitTokens: h('x-ratelimit-limit-tokens'),
+    remainingTokens: h('x-ratelimit-remaining-tokens'),
+    resetTokens: h('x-ratelimit-reset-tokens'),
+  };
+  // The message names the limit, e.g. "... on tokens per day (TPD): Limit 200000, Used ...".
+  const code = message ? /\((RPM|RPD|TPM|TPD)\)/.exec(message)?.[1] : undefined;
+  let kind: RateLimitKind = code ? (KIND_BY_CODE[code] ?? 'unknown') : 'unknown';
+  if (kind === 'unknown') {
+    if (info.remainingRequests === '0') kind = 'requests per day';
+    else if (info.remainingTokens === '0') kind = 'tokens per minute';
+  }
+  const seconds = Number(h('retry-after'));
+  const fromHeader = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+  const tryAgain = message ? /try again in ([\dhms.]+?)\.?(?:\s|$)/i.exec(message)?.[1] : undefined;
+  const fromMessage = tryAgain ? parseDuration(tryAgain) : null;
+  return {
+    kind,
+    message,
+    // The later of the two: retrying before the provider says so only burns a retry.
+    retryAfterMs:
+      fromHeader === null && fromMessage === null
+        ? null
+        : Math.max(fromHeader ?? 0, fromMessage ?? 0),
+    headers: info,
+  };
+}
+
 export class JudgeHttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly retryAfterMs: number | null,
+    readonly rateLimit: RateLimitInfo | null = null,
   ) {
     super(message);
     this.name = 'JudgeHttpError';
@@ -168,10 +289,18 @@ export class JudgeHttpError extends Error {
 
 /** Groq (OpenAI-compatible) JSON-mode completion, not streamed: the judge's speed doesn't matter. */
 export class GroqJudgeClient implements JudgeClient {
+  readonly settings: JudgeSettings;
   constructor(
     readonly model: string,
-    private readonly opts: { apiKey: string; baseUrl: string; fetch?: FetchFn },
-  ) {}
+    private readonly opts: {
+      apiKey: string;
+      baseUrl: string;
+      fetch?: FetchFn;
+      settings?: JudgeSettings;
+    },
+  ) {
+    this.settings = opts.settings ?? DEFAULT_JUDGE_SETTINGS;
+  }
 
   async complete(messages: ChatMessage[]): Promise<{ text: string; usage: TokenUsage | null }> {
     const fetchFn = this.opts.fetch ?? ((url, init) => fetch(url, init));
@@ -185,22 +314,20 @@ export class GroqJudgeClient implements JudgeClient {
         model: this.model,
         messages,
         temperature: 0,
-        // Largest reply seen was 656 tokens; providers count this cap against rate limits.
-        max_completion_tokens: 1024,
+        max_completion_tokens: this.settings.maxCompletionTokens,
         response_format: { type: 'json_object' },
         ...(/(^|\/)gpt-oss/i.test(this.model)
-          ? { reasoning_effort: 'medium', include_reasoning: false }
+          ? { reasoning_effort: this.settings.reasoningEffort, include_reasoning: false }
           : {}),
       }),
       signal: AbortSignal.timeout(60_000),
     });
     if (!res.ok) {
-      const seconds = Number(res.headers.get('retry-after'));
-      throw new JudgeHttpError(
-        res.status,
-        `judge HTTP ${String(res.status)}`,
-        res.status === 429 && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null,
-      );
+      if (res.status === 429) {
+        const info = parseRateLimit(res.headers, await res.text().catch(() => ''));
+        throw new JudgeHttpError(429, `judge HTTP 429 (${info.kind})`, info.retryAfterMs, info);
+      }
+      throw new JudgeHttpError(res.status, `judge HTTP ${String(res.status)}`, null);
     }
     const parsed = CompletionSchema.safeParse(await res.json());
     if (!parsed.success) throw new Error('judge returned an unexpected response');

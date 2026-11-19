@@ -8,9 +8,16 @@ import {
 import { describe, expect, it } from 'vitest';
 import { parseCases } from './cases';
 import type { JudgeClient } from './judge';
-import { JudgeHttpError, STANDARD_MUST_NOT } from './judge';
+import { DEFAULT_JUDGE_SETTINGS, JudgeHttpError, STANDARD_MUST_NOT } from './judge';
 import type { ResolvedCase } from './resolve';
-import { backoffMs, FIRST_TOKEN_DEADLINE_MS, runCases, type RunnerDeps, Semaphore } from './runner';
+import {
+  backoffMs,
+  FIRST_TOKEN_DEADLINE_MS,
+  JudgeGate,
+  runCases,
+  type RunnerDeps,
+  Semaphore,
+} from './runner';
 import { isUngraded } from './scoring';
 
 /** Fake time: the fake model moves it forward as it "streams". */
@@ -68,6 +75,7 @@ const verdict = (score: number, violated = false) =>
 
 class FakeJudge implements JudgeClient {
   readonly model = 'judge-model';
+  readonly settings = DEFAULT_JUDGE_SETTINGS;
   calls = 0;
   constructor(private readonly answers: (string | Error)[] = [verdict(5)]) {}
   complete() {
@@ -281,6 +289,7 @@ describe('runCases', () => {
     let maxActive = 0;
     const slowJudge: JudgeClient = {
       model: 'judge-model',
+      settings: DEFAULT_JUDGE_SETTINGS,
       async complete() {
         active++;
         maxActive = Math.max(maxActive, active);
@@ -395,11 +404,99 @@ describe('Semaphore', () => {
 });
 
 describe('backoffMs', () => {
-  it('waits at least an exponential backoff, longer if the provider asks, capped at 60 s', () => {
+  it('waits at least an exponential backoff (capped at 60 s), or the provider retry-after in full', () => {
     expect([0, 1, 2, 3, 4, 5, 6].map((a) => backoffMs(a, 1000))).toEqual([
       2000, 4000, 8000, 16000, 32000, 60000, 60000,
     ]);
     expect(backoffMs(0, 7000)).toBe(7000); // the provider's retry-after wins when longer
-    expect(backoffMs(1, 120_000)).toBe(60_000);
+    // Never shortened: retrying a "try again in 2 minutes" after 60 s only burns a retry.
+    expect(backoffMs(1, 120_000)).toBe(120_000);
+  });
+});
+
+describe('JudgeGate', () => {
+  it('spaces judge calls by the pacing interval', async () => {
+    const clock = new Clock();
+    const starts: number[] = [];
+    const gate = new JudgeGate(1, 12_000, {
+      now: clock.now,
+      sleep: (ms) => {
+        clock.t += ms;
+        return Promise.resolve();
+      },
+    });
+    for (let i = 0; i < 3; i++) await gate.run(() => Promise.resolve(starts.push(clock.t)));
+    expect(starts).toEqual([0, 12_000, 24_000]);
+  });
+
+  it('holds every judge call until a 429 retry-after has passed', async () => {
+    const clock = new Clock();
+    const gate = new JudgeGate(1, 0, {
+      now: clock.now,
+      sleep: (ms) => {
+        clock.t += ms;
+        return Promise.resolve();
+      },
+    });
+    gate.pause(30_000);
+    let startedAt = -1;
+    await gate.run(() => Promise.resolve((startedAt = clock.t)));
+    expect(startedAt).toBe(30_000);
+  });
+
+  it('fails every later call at once when exhausted', async () => {
+    const gate = new JudgeGate(1, 0, { now: () => 0, sleep: () => Promise.resolve() });
+    gate.exhausted = 'tokens per day spent';
+    await expect(gate.run(() => Promise.resolve(1))).rejects.toThrow('tokens per day spent');
+  });
+});
+
+describe('runCases with a spent daily quota', () => {
+  it('stops waiting when the provider asks for more than maxWaitMs, and leaves the rest ungraded fast', async () => {
+    const clock = new Clock();
+    const sleeps: number[] = [];
+    const daily = new JudgeHttpError(429, 'judge HTTP 429 (tokens per day)', 7 * 60_000, {
+      kind: 'tokens per day',
+      message: 'Rate limit reached ... on tokens per day (TPD): Limit 200000, Used 199900',
+      retryAfterMs: 7 * 60_000,
+      headers: {
+        limitRequests: '1000',
+        remainingRequests: '500',
+        resetRequests: '1m',
+        limitTokens: '8000',
+        remainingTokens: '8000',
+        resetTokens: '0s',
+      },
+    });
+    const judge = new FakeJudge([daily]);
+    const gaveUp: boolean[] = [];
+    const records = await runCases(
+      makeCases(3),
+      { ...OPTS, runsPerCase: 1, concurrency: 1, maxWaitMs: 120_000 },
+      {
+        ...deps(new FakeLlm(clock, [{}, {}, {}]), judge, clock, sleeps),
+        onRateLimited: (_who, _ms, _info, g) => gaveUp.push(g),
+      },
+    );
+    expect(judge.calls).toBe(1); // the other two never hit the API
+    expect(sleeps).toEqual([]); // and nobody sat through 7 minutes
+    expect(gaveUp).toEqual([true]);
+    const runs = records.flatMap((r) => r.runs);
+    expect(runs.every((r) => isUngraded(r))).toBe(true);
+    expect(runs[0]?.judgeError).toMatch(
+      /^judge HTTP 429 \(tokens per day\): the provider asked to wait 7\.0 min, more than the 2\.0 min allowed$/,
+    );
+    expect(runs[0]?.judgeRateLimit?.kind).toBe('tokens per day');
+    expect(runs[2]?.judgeError).toBe(runs[0]?.judgeError);
+  });
+
+  it('records the judge settings on every graded run', async () => {
+    const clock = new Clock();
+    const [r] = await runCases(
+      makeCases(1),
+      { ...OPTS, runsPerCase: 1 },
+      deps(new FakeLlm(clock, [{}]), new FakeJudge(), clock),
+    );
+    expect(r?.runs[0]?.judgeSettings).toEqual(DEFAULT_JUDGE_SETTINGS);
   });
 });

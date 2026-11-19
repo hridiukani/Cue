@@ -16,12 +16,27 @@ import { candidateToCaseSkeleton, findCandidates, type ScanRecording } from './c
 import { CATEGORIES, type EvalCase, parseCases, sha256 } from './cases';
 import { compareRuns } from './compare';
 import { loadEvalConfig, useColor } from './config';
-import { GroqJudgeClient, JUDGE_VERSION } from './judge';
+import {
+  DEFAULT_JUDGE_SETTINGS,
+  GroqJudgeClient,
+  JUDGE_VERSION,
+  type JudgeSettings,
+  judgeSettingsKey,
+  type ReasoningEffort,
+  REJUDGE_SETTINGS,
+} from './judge';
 import { PRICING_SOURCE } from './pricing';
+import {
+  describeRateLimits,
+  newRateLimitStats,
+  type RateLimitStats,
+  recordRateLimit,
+} from './rate-limits';
+import { REJUDGE_INTERVAL_S, REJUDGE_MAX_WAIT_S, rejudgeRun } from './rejudge';
 import { COLOR, formatCompare, formatRun, PLAIN } from './report';
 import { type LoadUtterances, parsePlaybooks, resolveCase, type ResolvedCase } from './resolve';
 import { gitInfo, loadRun, resolveRunRef, type RunFile, saveRun } from './results';
-import { runCases } from './runner';
+import { DEFAULT_MAX_WAIT_MS, JudgeGate, runCases, type RunnerDeps } from './runner';
 import { isUngraded } from './scoring';
 import { runProblems, summarizeCase, summarizeRun } from './summary';
 
@@ -34,6 +49,7 @@ const CANDIDATES_DIR = path.join(PACKAGE_ROOT, 'candidates');
 
 const USAGE = `Usage:
   pnpm eval [run] [options]          run the eval and save the result
+  pnpm eval rejudge <run>            grade a saved run's ungraded lines (nothing regenerated)
   pnpm eval compare <A> <B>          diff two saved runs (B = after)
   pnpm eval candidates [options]     scan imported calls for candidate moments
   pnpm eval cases                    validate dataset/cases.jsonl and summarise it
@@ -48,10 +64,24 @@ run options:
   --category <name>       only this category (repeatable): ${CATEGORIES.join(', ')}
   --concurrency <n>       generations in parallel (default 4)
   --judge-concurrency <n> judge calls in parallel (default 1; providers limit tokens per minute)
+  --judge-effort <e>      judge reasoning effort: low, medium, high (default medium)
+  --judge-max-tokens <n>  judge token budget, hidden reasoning included (default 1024)
+  --judge-interval <s>    at least this many seconds between judge calls (default 0)
+  --max-wait <s>          longest provider retry-after to wait out (default 120); a longer
+                          one leaves the remaining lines ungraded, for pnpm eval rejudge
   --min-pass-rate <0-1>   exit 1 if the pass rate is below this
+                          (it also exits 1 if more than 5% of runs are ungraded)
   --json <file>           also write the summary as JSON here
   --markdown <file>       append the report as Markdown (e.g. $GITHUB_STEP_SUMMARY)
   --no-db                 don't connect to the database (cases that need it are skipped)
+
+rejudge options (writes a new results file; the original is kept):
+  <run> is "latest", "previous", a file path, or the start of a file name in results/
+  --judge-effort <e>      default low
+  --judge-max-tokens <n>  default 512
+  --judge-interval <s>    default ${String(REJUDGE_INTERVAL_S)}
+  --max-wait <s>          default ${String(REJUDGE_MAX_WAIT_S)}
+  --judge-concurrency <n> default 1
 
 compare options:
   A and B are "latest", "previous", a file path, or the start of a file name in results/
@@ -101,12 +131,18 @@ async function cmdRun(argv: string[]): Promise<number> {
       category: { type: 'string', multiple: true },
       concurrency: { type: 'string' },
       'judge-concurrency': { type: 'string' },
+      ...JUDGE_FLAGS,
       'min-pass-rate': { type: 'string' },
       json: { type: 'string' },
       markdown: { type: 'string' },
       'no-db': { type: 'boolean', default: false },
     },
     strict: true,
+  });
+  const judgeOpts = judgeFlags(values, {
+    settings: DEFAULT_JUDGE_SETTINGS,
+    intervalS: 0,
+    maxWaitS: DEFAULT_MAX_WAIT_MS / 1000,
   });
   const config = loadEvalConfig();
   const model = values.model ?? config.defaultModel;
@@ -178,20 +214,29 @@ async function cmdRun(argv: string[]): Promise<number> {
     );
     const total = resolved.length * runsPerCase;
     let done = 0;
+    const rateLimits = newRateLimitStats();
     const records = await runCases(
       resolved,
-      { model, promptVersion, runsPerCase, concurrency, judgeConcurrency },
+      {
+        model,
+        promptVersion,
+        runsPerCase,
+        concurrency,
+        judgeConcurrency,
+        judgeMinIntervalMs: judgeOpts.intervalMs,
+        maxWaitMs: judgeOpts.maxWaitMs,
+      },
       {
         llm: new GroqClient({ apiKey: config.groqApiKey, baseUrl: config.groqBaseUrl }),
         judge: new GroqJudgeClient(judgeModel, {
           apiKey: config.groqApiKey,
           baseUrl: config.groqBaseUrl,
+          settings: judgeOpts.settings,
         }),
         now: () => performance.now(),
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
         timeout: (ms) => AbortSignal.timeout(ms),
-        // 'w' = waiting out a rate limit (the provider's retry-after); the run continues.
-        onRateLimited: () => process.stdout.write('w'),
+        onRateLimited: rateLimitProgress(rateLimits),
         onRunDone: (_id, run) => {
           done++;
           // E = model error, U = ungraded (the judge failed), F = graded fail.
@@ -218,12 +263,15 @@ async function cmdRun(argv: string[]): Promise<number> {
         selection: { smoke: values.smoke, caseIds: values.case ?? null, categories },
         skipped,
         pricing: { ...PRICING_SOURCE },
+        judgeSettings: judgeOpts.settings,
+        rateLimits,
       },
       summary: summarizeRun(records, { model, judgeModel }),
       cases: records.map((r) => ({ ...r, summary: summarizeCase(r) })),
     };
     const file = await saveRun(RESULTS_DIR, run);
     console.log(`\n${formatRun(run, useColor(process.stdout.isTTY) ? COLOR : PLAIN)}`);
+    printRateLimits(rateLimits);
     console.log(`\nSaved ${path.relative(process.cwd(), file)}`);
     // pnpm runs this script inside packages/evals: resolve paths from where the command was typed.
     const out = (p: string | undefined) => (p ? path.resolve(config.invocationDir, p) : undefined);
@@ -253,6 +301,166 @@ async function cmdRun(argv: string[]): Promise<number> {
 function reportProblems(problems: readonly string[]): number {
   for (const p of problems) console.error(`\n${p}`);
   return problems.length > 0 ? 1 : 0;
+}
+
+// ------------------------------------------------------------------ judge flags
+
+const JUDGE_FLAGS = {
+  'judge-effort': { type: 'string' },
+  'judge-max-tokens': { type: 'string' },
+  'judge-interval': { type: 'string' },
+  'max-wait': { type: 'string' },
+} as const;
+
+const EFFORTS: readonly ReasoningEffort[] = ['low', 'medium', 'high'];
+
+function nonNegativeSeconds(v: string | undefined, flag: string, fallback: number): number {
+  if (v === undefined) return fallback;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`${flag} must be a number of seconds ≥ 0`);
+  return n;
+}
+
+function judgeFlags(
+  values: {
+    'judge-effort'?: string;
+    'judge-max-tokens'?: string;
+    'judge-interval'?: string;
+    'max-wait'?: string;
+  },
+  defaults: { settings: JudgeSettings; intervalS: number; maxWaitS: number },
+): { settings: JudgeSettings; intervalMs: number; maxWaitMs: number } {
+  const effort = values['judge-effort'] ?? defaults.settings.reasoningEffort;
+  const reasoningEffort = EFFORTS.find((e) => e === effort);
+  if (!reasoningEffort) throw new Error(`--judge-effort must be one of ${EFFORTS.join(', ')}`);
+  return {
+    settings: {
+      reasoningEffort,
+      maxCompletionTokens: positiveInt(
+        values['judge-max-tokens'],
+        '--judge-max-tokens',
+        defaults.settings.maxCompletionTokens,
+      ),
+    },
+    intervalMs:
+      nonNegativeSeconds(values['judge-interval'], '--judge-interval', defaults.intervalS) * 1000,
+    maxWaitMs: nonNegativeSeconds(values['max-wait'], '--max-wait', defaults.maxWaitS) * 1000,
+  };
+}
+
+/** Progress marks: 'w' = waiting out a retry-after, '!' = gave up waiting (the rest go ungraded). */
+function rateLimitProgress(stats: RateLimitStats): RunnerDeps['onRateLimited'] {
+  return (who, _ms, info, gaveUp) => {
+    recordRateLimit(stats, who, info, gaveUp);
+    process.stdout.write(gaveUp ? '!' : 'w');
+  };
+}
+
+function printRateLimits(stats: RateLimitStats): void {
+  const lines = describeRateLimits(stats);
+  if (lines.length > 0) console.log(`\n${lines.join('\n')}`);
+}
+
+// ------------------------------------------------------------------ rejudge
+
+async function cmdRejudge(argv: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      ...JUDGE_FLAGS,
+      'judge-concurrency': { type: 'string' },
+      'no-db': { type: 'boolean', default: false },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
+  const [ref] = positionals;
+  if (!ref || positionals.length > 1) throw new Error('Usage: pnpm eval rejudge <results file>');
+  const judgeOpts = judgeFlags(values, {
+    settings: REJUDGE_SETTINGS,
+    intervalS: REJUDGE_INTERVAL_S,
+    maxWaitS: REJUDGE_MAX_WAIT_S,
+  });
+  const judgeConcurrency = positiveInt(values['judge-concurrency'], '--judge-concurrency', 1);
+  const config = loadEvalConfig();
+  if (!config.groqApiKey) throw new Error('GROQ_API_KEY is not set (.env, or the CI secret).');
+
+  // A bare name is looked up in results/; a path is resolved from where the command was typed.
+  const sourceFile = await resolveRunRef(
+    RESULTS_DIR,
+    ref.endsWith('.json') ? path.resolve(config.invocationDir, ref) : ref,
+  );
+  const source = await loadRun(sourceFile);
+  const pending = source.cases.flatMap((c) => c.runs).filter((r) => isUngraded(r)).length;
+  console.log(
+    `${path.basename(sourceFile)}: ${String(pending)} of ${String(source.summary.runs)} runs ungraded (model ${source.meta.model}, prompt ${source.meta.promptVersion}).`,
+  );
+  if (pending === 0) {
+    console.log('Nothing to re-grade.');
+    return 0;
+  }
+  console.log(
+    `Re-grading them from the saved lines with ${source.meta.judgeModel} at ${judgeSettingsKey(judgeOpts.settings)} (effort/max tokens), one call every ${String(judgeOpts.intervalMs / 1000)} s, waiting out retry-after up to ${String(judgeOpts.maxWaitMs / 1000)} s.`,
+  );
+
+  const { cases } = await readCases();
+  const byId = new Map(cases.map((c) => [c.id, c]));
+  const playbooks = parsePlaybooks(await readFile(PLAYBOOKS_FILE, 'utf8'));
+  const needsDb = source.cases.some((c) => byId.get(c.id)?.window === null);
+  const conn = needsDb && !values['no-db'] ? connectDb(config.databaseUrl) : null;
+  try {
+    const rateLimits = newRateLimitStats();
+    let done = 0;
+    const now = () => performance.now();
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const { run, info } = await rejudgeRun(
+      { file: sourceFile, run: source },
+      async (caseId) => {
+        const c = byId.get(caseId);
+        if (!c) return { ok: false, reason: 'no longer in dataset/cases.jsonl' };
+        try {
+          const r = await resolveCase(c, playbooks, conn ? dbLoader(conn.db) : null);
+          return r.ok ? { ok: true, resolved: r.resolved } : { ok: false, reason: r.reason };
+        } catch (err) {
+          return {
+            ok: false,
+            reason: `database: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      },
+      {
+        judge: new GroqJudgeClient(source.meta.judgeModel, {
+          apiKey: config.groqApiKey,
+          baseUrl: config.groqBaseUrl,
+          settings: judgeOpts.settings,
+        }),
+        gate: new JudgeGate(judgeConcurrency, judgeOpts.intervalMs, { now, sleep }),
+        maxWaitMs: judgeOpts.maxWaitMs,
+        onRateLimited: rateLimitProgress(rateLimits),
+        createdAt: () => new Date().toISOString(),
+        git: await gitInfo(REPO_ROOT),
+        onGraded: (_id, r) => {
+          done++;
+          process.stdout.write(isUngraded(r) ? 'U' : r.pass ? '.' : 'F');
+          if (done % 60 === 0 || done === pending)
+            process.stdout.write(` ${String(done)}/${String(pending)}\n`);
+        },
+      },
+    );
+    run.meta.rateLimits = rateLimits;
+    const file = await saveRun(RESULTS_DIR, run);
+    console.log(`\n${formatRun(run, useColor(process.stdout.isTTY) ? COLOR : PLAIN)}`);
+    printRateLimits(rateLimits);
+    for (const s of info.skipped) console.log(`Skipped ${s.caseId}: ${s.reason}`);
+    console.log(
+      `\nRe-graded ${String(info.regraded)} of ${String(pending)}; ${String(info.stillUngraded)} still ungraded. Saved ${path.relative(process.cwd(), file)}`,
+    );
+    return reportProblems(
+      runProblems(run.summary, { minPassRate: null, file: path.relative(process.cwd(), file) }),
+    );
+  } finally {
+    await conn?.close();
+  }
 }
 
 // ------------------------------------------------------------------ compare
@@ -371,6 +579,8 @@ async function main(): Promise<number> {
   loadRootEnvFile();
   const [first, ...rest] = argv;
   switch (first) {
+    case 'rejudge':
+      return cmdRejudge(rest);
     case 'compare':
       return cmdCompare(rest);
     case 'candidates':

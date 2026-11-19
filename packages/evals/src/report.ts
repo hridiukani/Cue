@@ -1,4 +1,6 @@
-import type { CompareResult } from './compare';
+import path from 'node:path';
+import { type CompareResult, formatGradedBy } from './compare';
+import { judgeSettingsKey } from './judge';
 import type { RunFile } from './results';
 import { UNGRADED_MAX_SHARE } from './summary';
 
@@ -62,6 +64,21 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
   lines.push(
     `model ${meta.model} · prompt ${meta.promptVersion} · judge ${meta.judgeModel} (${meta.judgeVersion}) · N=${String(meta.runsPerCase)} · ${commit}`,
   );
+  if (meta.rejudge) {
+    const rj = meta.rejudge;
+    lines.push(
+      style.yellow(
+        `Re-graded by pnpm eval rejudge from ${path.basename(rj.of.file)}: ${String(rj.regraded)} line(s) graded with judge settings ${judgeSettingsKey(rj.judgeSettings)}, from the saved model output (nothing regenerated).${rj.skipped.length > 0 ? ` ${String(rj.skipped.length)} case(s) skipped.` : ''}`,
+      ),
+    );
+  }
+  if (Object.keys(s.gradedBy).length > 1) {
+    lines.push(
+      style.yellow(
+        `Judge settings are mixed in this run: ${formatGradedBy(s.gradedBy)} (effort/max tokens). Verdicts from different settings aren't guaranteed to agree.`,
+      ),
+    );
+  }
   if (meta.skipped.length > 0) {
     lines.push(style.yellow(`Skipped ${String(meta.skipped.length)} case(s):`));
     for (const sk of meta.skipped) lines.push(style.yellow(`  ${sk.caseId}: ${sk.reason}`));

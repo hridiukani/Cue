@@ -3,6 +3,9 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
+import type { JudgeSettings } from './judge';
+import type { RateLimitStats } from './rate-limits';
+import type { RejudgeInfo } from './rejudge';
 import {
   type CaseRecord,
   type CaseSummary,
@@ -34,6 +37,12 @@ export interface RunMeta {
   selection: { smoke: boolean; caseIds: string[] | null; categories: string[] | null };
   skipped: { caseId: string; reason: string }[];
   pricing: { url: string; checkedOn: string };
+  /** How the judge was asked for this run's own grading (missing before 2026-11-19). */
+  judgeSettings?: JudgeSettings;
+  /** Which provider limits the run hit (missing before 2026-11-19). */
+  rateLimits?: RateLimitStats;
+  /** Set on a file written by `pnpm eval rejudge`. */
+  rejudge?: RejudgeInfo;
 }
 
 export interface RunFile {
@@ -115,9 +124,12 @@ const RunFileSchema = z
 
 const slug = (s: string) => s.replace(/[^a-zA-Z0-9.-]+/g, '-').replace(/^-+|-+$/g, '');
 
-export function runFileName(meta: Pick<RunMeta, 'createdAt' | 'model' | 'promptVersion'>): string {
+export function runFileName(
+  meta: Pick<RunMeta, 'createdAt' | 'model' | 'promptVersion' | 'rejudge'>,
+): string {
   const stamp = meta.createdAt.replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
-  return `${stamp}_${slug(meta.model)}_${slug(meta.promptVersion)}.json`;
+  const suffix = meta.rejudge ? '_rejudged' : '';
+  return `${stamp}_${slug(meta.model)}_${slug(meta.promptVersion)}${suffix}.json`;
 }
 
 export async function saveRun(dir: string, run: RunFile): Promise<string> {

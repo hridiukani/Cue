@@ -82,6 +82,28 @@ function settingsChanged(a: RunFile['meta'], b: RunFile['meta']): string[] {
   return out;
 }
 
+/** "medium/1024 ×51, low/512 ×78": which judge settings graded the runs. */
+export function formatGradedBy(gradedBy: Record<string, number>): string {
+  return Object.entries(gradedBy)
+    .sort(([x], [y]) => x.localeCompare(y))
+    .map(([k, n]) => `${k} ×${String(n)}`)
+    .join(', ');
+}
+
+/**
+ * Judge settings differ when the two runs were graded with different
+ * reasoning effort or token budgets, or either mixes several (after a
+ * rejudge). Verdicts from different settings aren't guaranteed to agree.
+ */
+function judgeSettingsChanged(a: RunFile['summary'], b: RunFile['summary']): string | null {
+  const ka = Object.keys(a.gradedBy).sort().join(',');
+  const kb = Object.keys(b.gradedBy).sort().join(',');
+  const mixed = Object.keys(a.gradedBy).length > 1 || Object.keys(b.gradedBy).length > 1;
+  return ka !== kb || mixed
+    ? `judge settings: ${formatGradedBy(a.gradedBy)} → ${formatGradedBy(b.gradedBy)}`
+    : null;
+}
+
 /** Runs of this case where the model failed or the run is ungraded (not a quality signal). */
 function erroredRuns(c: RunFile['cases'][number]): number {
   return c.runs.filter((r) => r.error !== null || isUngraded(r)).length;
@@ -143,6 +165,8 @@ export function compareRuns(
   });
 
   const changed = settingsChanged(a.run.meta, b.run.meta);
+  const judgeChange = judgeSettingsChanged(a.run.summary, b.run.summary);
+  if (judgeChange) changed.push(judgeChange);
   const sa = a.run.summary;
   const sb = b.run.summary;
   const passRate = diff(sa.passRate, sb.passRate);

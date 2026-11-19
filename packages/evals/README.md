@@ -19,6 +19,7 @@ pnpm eval                                   # all cases, 3 runs each, default mo
 pnpm eval --model openai/gpt-oss-20b --prompt-version suggest-v1
 pnpm eval --smoke --runs 3                  # the small subset CI runs
 pnpm eval --category price_objection --runs 5
+pnpm eval rejudge latest                    # grade the ungraded lines of a saved run (no regeneration)
 pnpm eval compare previous latest           # diff two saved runs, regressions first
 pnpm eval candidates                        # propose new moments from your imported calls
 pnpm eval cases                             # validate dataset/cases.jsonl and summarise it
@@ -27,7 +28,47 @@ pnpm eval --help
 
 You need `GROQ_API_KEY` in `.env`. Cases from datasets without a license also need your local database with the calls imported (`docker compose up -d`, then `pnpm ingest -- --dataset real-sales`). Without them, those cases are skipped and listed as skipped.
 
-**How long it takes:** our Groq account allows 8,000 tokens per minute per model. A judge call uses about 1,500 tokens, so a full run (43 cases × 3 runs) takes roughly 25 minutes. The harness waits out rate limits (shown as `w` in the progress line) instead of failing runs.
+**How long it takes:** our Groq account allows 8,000 tokens per minute per model. A judge call uses about 1,500 tokens, so a full run (43 cases × 3 runs) takes roughly 25 minutes.
+
+**Rate limits:**
+
+- The harness waits out a rate limit for the full retry-after the provider asks for, and pauses every judge call meanwhile. This shows as `w` in the progress line.
+- A wait longer than `--max-wait` (default 2 minutes) means a slow-refilling quota is spent, such as tokens per day. The remaining lines are then left **ungraded** straight away (`!`, then `U`), rather than each one sitting out the wait.
+- After a run, the report says which limit was hit, from the provider's 429 message and `x-ratelimit-*` headers.
+
+**Progress marks:**
+
+| Mark | Meaning                               |
+| ---- | ------------------------------------- |
+| `.`  | pass                                  |
+| `F`  | graded fail                           |
+| `U`  | ungraded (the judge failed)           |
+| `E`  | model error                           |
+| `w`  | waiting out a rate limit              |
+| `!`  | gave up waiting; the rest go ungraded |
+
+## Re-grading ungraded lines: `pnpm eval rejudge <run>`
+
+When the judge failed on more than 5% of lines, `pnpm eval` exits non-zero and suggests:
+
+```sh
+pnpm eval rejudge results/20261119T001448Z_openai-gpt-oss-20b_suggest-v1.json
+```
+
+This grades only the ungraded lines, from the lines the model already wrote. Nothing is regenerated, so the lines, latency and cost stay exactly as measured. The result is written to a new `…_rejudged.json`, and the original is kept.
+
+It is gentler on the judge's quota by default:
+
+- one call every 12 s, one at a time;
+- low reasoning effort and a 512-token budget;
+- waits of up to 15 minutes for a retry-after.
+
+Run it again later if it stopped at a daily limit.
+
+**Things to know:**
+
+- **Mixed judge settings.** Lines graded this way used different judge settings from the rest of the run, which can shift verdicts. The report and `compare` list the mix, for example `medium/1024 ×51, low/512 ×78`.
+- **Changed rubrics are skipped.** A case whose rubric, playbook or window changed since the run is skipped, so one run never mixes two rubrics.
 
 ## What a run reports
 

@@ -13,7 +13,9 @@ import {
   buildJudgeMessages,
   type JudgeClient,
   JudgeHttpError,
+  type JudgeSettings,
   parseVerdict,
+  type RateLimitInfo,
 } from './judge';
 import type { ResolvedCase } from './resolve';
 import { scoreRun } from './scoring';
@@ -26,7 +28,9 @@ import type { CaseRecord, RunRecord } from './summary';
  *
  * Unlike production, a 429 is retried here after the provider's retry-after:
  * an eval needs an answer for every case, and only the successful attempt's
- * latency is recorded. Everything else that fails is recorded as a failed run.
+ * latency is recorded. A model failure is recorded as a failed run; a judge
+ * failure leaves the run UNGRADED (see scoring.ts), to grade later with
+ * `pnpm eval rejudge`.
  */
 
 export const FIRST_TOKEN_DEADLINE_MS = 1500; // production's drop deadline
@@ -43,22 +47,33 @@ export interface RunnerOptions {
    * (8,000/min for openai/gpt-oss-120b on our Groq account, 2026-11-18).
    */
   judgeConcurrency?: number;
+  /** Minimum time between the starts of two judge calls (default 0: no pacing). */
+  judgeMinIntervalMs?: number;
   totalTimeoutMs?: number;
   /** Rate-limit retries per request (default 8). Evals can afford to wait. */
   maxRetries?: number;
+  /**
+   * The longest provider wait (retry-after) worth sitting through, default
+   * 2 minutes. A longer one means a quota that refills slowly (e.g. tokens
+   * per day) is spent: the remaining judge calls are left ungraded at once
+   * rather than each waiting it out, and `pnpm eval rejudge` grades them later.
+   */
+  maxWaitMs?: number;
 }
 
-const DEFAULT_MAX_RETRIES = 8;
+export const DEFAULT_MAX_RETRIES = 8;
+export const DEFAULT_MAX_WAIT_MS = 120_000;
 
 /**
  * How long to wait before retry number `attempt` (0-based): the provider's
- * retry-after, but at least an exponential backoff (2 s, 4 s, 8 s … capped at
- * 60 s). Groq's retry-after is often a few seconds while two judge workers
- * keep competing for the same per-minute token budget; in the first full run
- * 8 short waits ran out for 28 of 129 judge calls.
+ * retry-after in full (never shortened: retrying early only burns a retry),
+ * or an exponential backoff (2 s, 4 s, 8 s … capped at 60 s) if that's longer.
+ *
+ * Until 2026-11-19 the provider's wait was capped at 60 s too, so a "try again
+ * in 7 minutes" was retried after 60 s eight times and every retry was wasted.
  */
 export function backoffMs(attempt: number, providerWaitMs: number): number {
-  return Math.min(60_000, Math.max(providerWaitMs, 2000 * 2 ** attempt));
+  return Math.max(providerWaitMs, Math.min(60_000, 2000 * 2 ** attempt));
 }
 
 /** At most `size` holders at once; the rest wait in order. */
@@ -82,6 +97,54 @@ export class Semaphore {
   }
 }
 
+export class JudgeExhaustedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'JudgeExhaustedError';
+  }
+}
+
+/**
+ * Every judge call goes through one gate:
+ * - at most `concurrency` calls in flight;
+ * - at least `minIntervalMs` between call starts (pacing under a tokens-per-minute limit);
+ * - after a 429, NO judge call starts until the provider's retry-after has passed;
+ * - once the provider asks for a wait longer than the allowed maximum, the
+ *   gate is "exhausted" and every later call fails at once with the reason.
+ */
+export class JudgeGate {
+  private readonly slots: Semaphore;
+  private lastStart = Number.NEGATIVE_INFINITY;
+  private pausedUntil = Number.NEGATIVE_INFINITY;
+  exhausted: string | null = null;
+  constructor(
+    concurrency: number,
+    private readonly minIntervalMs: number,
+    private readonly clock: { now: () => number; sleep: (ms: number) => Promise<void> },
+  ) {
+    this.slots = new Semaphore(Math.max(1, concurrency));
+  }
+
+  /** The provider said: no calls for `ms`. */
+  pause(ms: number): void {
+    this.pausedUntil = Math.max(this.pausedUntil, this.clock.now() + ms);
+  }
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    return this.slots.run(async () => {
+      for (;;) {
+        if (this.exhausted) throw new JudgeExhaustedError(this.exhausted);
+        const wait =
+          Math.max(this.pausedUntil, this.lastStart + this.minIntervalMs) - this.clock.now();
+        if (wait <= 0) break;
+        await this.clock.sleep(wait);
+      }
+      this.lastStart = this.clock.now();
+      return fn();
+    });
+  }
+}
+
 export interface RunnerDeps {
   llm: LlmClient;
   judge: JudgeClient;
@@ -91,8 +154,13 @@ export interface RunnerDeps {
   /** An AbortSignal that fires after ms (AbortSignal.timeout in the CLI). */
   timeout: (ms: number) => AbortSignal;
   onRunDone?: (caseId: string, run: RunRecord) => void;
-  /** A request was rate limited and will be retried after `waitMs`. */
-  onRateLimited?: (who: 'model' | 'judge', waitMs: number) => void;
+  /** A request was rate limited and will be retried after `waitMs` (or not, if `gaveUp`). */
+  onRateLimited?: (
+    who: 'model' | 'judge',
+    waitMs: number,
+    info: RateLimitInfo | null,
+    gaveUp: boolean,
+  ) => void;
 }
 
 interface Generation {
@@ -109,6 +177,9 @@ const retryDelay = (err: unknown): number | null => {
   return null;
 };
 
+const minutes = (ms: number) =>
+  ms >= 60_000 ? `${(ms / 60_000).toFixed(1)} min` : `${String(Math.round(ms / 1000))} s`;
+
 async function generate(
   rc: ResolvedCase,
   opts: RunnerOptions,
@@ -120,6 +191,7 @@ async function generate(
     promptVersion: opts.promptVersion,
   });
   const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxWait = opts.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   for (let attempt = 0; ; attempt++) {
     let usage: TokenUsage | null = null;
     let raw = '';
@@ -147,9 +219,12 @@ async function generate(
       const wait = retryDelay(err);
       if (wait !== null && attempt < maxRetries) {
         const ms = backoffMs(attempt, wait);
-        deps.onRateLimited?.('model', ms);
-        await deps.sleep(ms);
-        continue;
+        const gaveUp = ms > maxWait;
+        deps.onRateLimited?.('model', ms, null, gaveUp);
+        if (!gaveUp) {
+          await deps.sleep(ms);
+          continue;
+        }
       }
       const message = err instanceof Error ? err.message : String(err);
       return { raw, firstTokenMs: null, usage, error: `model: ${message}` };
@@ -157,17 +232,29 @@ async function generate(
   }
 }
 
-async function judge(
-  rc: ResolvedCase,
-  shown: string,
-  opts: RunnerOptions,
-  deps: RunnerDeps,
-  slots: Semaphore,
-): Promise<{
+export interface Graded {
   verdict: RunRecord['verdict'];
   error: string | null;
   usage: TokenUsage | null;
-}> {
+  settings: JudgeSettings;
+  /** The last 429 seen while grading (null if none). */
+  rateLimit: RateLimitInfo | null;
+}
+
+export interface GradeContext {
+  judge: JudgeClient;
+  gate: JudgeGate;
+  maxRetries?: number;
+  maxWaitMs?: number;
+  onRateLimited?: RunnerDeps['onRateLimited'];
+}
+
+/** Grade one shown line against its case's rubric. Shared by `pnpm eval` and `pnpm eval rejudge`. */
+export async function gradeLine(
+  rc: ResolvedCase,
+  shown: string,
+  ctx: GradeContext,
+): Promise<Graded> {
   const mustNot = allMustNot(rc.case.rubric.mustNot);
   const messages = buildJudgeMessages({
     window: rc.window,
@@ -179,13 +266,21 @@ async function judge(
   // Every judge call is billed, including retries: add them all up.
   const total = { promptTokens: 0, completionTokens: 0, reasoningTokens: 0 };
   let billed = false;
-  const usage = (): TokenUsage | null => (billed ? { ...total } : null);
+  let rateLimit: RateLimitInfo | null = null;
+  const done = (verdict: Graded['verdict'], error: string | null): Graded => ({
+    verdict,
+    error,
+    usage: billed ? { ...total } : null,
+    settings: ctx.judge.settings,
+    rateLimit,
+  });
   let lastError = 'judge failed';
-  const maxRetries = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxRetries = ctx.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const maxWait = ctx.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   // One extra try for an unreadable verdict; rate limits wait and retry.
   for (let attempt = 0, badVerdicts = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await slots.run(() => deps.judge.complete(messages));
+      const res = await ctx.gate.run(() => ctx.judge.complete(messages));
       if (res.usage) {
         billed = true;
         total.promptTokens += res.usage.promptTokens;
@@ -193,19 +288,27 @@ async function judge(
         total.reasoningTokens += res.usage.reasoningTokens ?? 0;
       }
       const parsed = parseVerdict(res.text, rc.case.rubric.must.length, mustNot.length);
-      if (parsed.ok) return { verdict: parsed.verdict, error: null, usage: usage() };
+      if (parsed.ok) return done(parsed.verdict, null);
       lastError = parsed.error;
       if (++badVerdicts > 1) break;
     } catch (err) {
       lastError = err instanceof Error ? err.message : String(err);
+      if (err instanceof JudgeHttpError && err.rateLimit) rateLimit = err.rateLimit;
       const wait = retryDelay(err);
-      if (wait === null || attempt === maxRetries) break;
+      if (wait === null) break;
       const ms = backoffMs(attempt, wait);
-      deps.onRateLimited?.('judge', ms);
-      await deps.sleep(ms);
+      if (ms > maxWait) {
+        ctx.onRateLimited?.('judge', ms, rateLimit, true);
+        ctx.gate.exhausted ??= `${lastError}: the provider asked to wait ${minutes(ms)}, more than the ${minutes(maxWait)} allowed`;
+        lastError = ctx.gate.exhausted;
+        break;
+      }
+      if (attempt === maxRetries) break;
+      ctx.onRateLimited?.('judge', ms, rateLimit, false);
+      ctx.gate.pause(ms);
     }
   }
-  return { verdict: null, error: lastError, usage: usage() };
+  return done(null, lastError);
 }
 
 async function runOnce(
@@ -213,19 +316,25 @@ async function runOnce(
   attempt: number,
   opts: RunnerOptions,
   deps: RunnerDeps,
-  judgeSlots: Semaphore,
+  gate: JudgeGate,
 ): Promise<RunRecord> {
   const gen = await generate(rc, opts, deps);
   const checks = gen.error ? null : runDeterministicChecks(gen.raw, rc.case.rubric.bannedPhrases);
   const graded =
     checks && checks.shown !== ''
-      ? await judge(rc, checks.shown, opts, deps, judgeSlots)
-      : { verdict: null, error: null, usage: null };
+      ? await gradeLine(rc, checks.shown, {
+          judge: deps.judge,
+          gate,
+          maxRetries: opts.maxRetries,
+          maxWaitMs: opts.maxWaitMs,
+          onRateLimited: deps.onRateLimited,
+        })
+      : null;
   const score = scoreRun({
     checks,
-    verdict: graded.verdict,
+    verdict: graded?.verdict ?? null,
     error: gen.error,
-    judgeError: graded.error,
+    judgeError: graded?.error ?? null,
   });
   return {
     attempt,
@@ -233,8 +342,8 @@ async function runOnce(
     shown: checks?.shown ?? '',
     words: checks?.words ?? 0,
     checks: checks?.checks ?? [],
-    verdict: graded.verdict,
-    judgeError: graded.error,
+    verdict: graded?.verdict ?? null,
+    judgeError: graded?.error ?? null,
     error: gen.error,
     pass: score.pass,
     score: score.score,
@@ -242,7 +351,9 @@ async function runOnce(
     firstTokenMs: gen.firstTokenMs,
     overDeadline: gen.firstTokenMs !== null && gen.firstTokenMs > FIRST_TOKEN_DEADLINE_MS,
     usage: gen.usage,
-    judgeUsage: graded.usage,
+    judgeUsage: graded?.usage ?? null,
+    judgeSettings: graded ? graded.settings : null,
+    judgeRateLimit: graded?.error ? graded.rateLimit : null,
   };
 }
 
@@ -270,7 +381,7 @@ export async function runCases(
   for (let attempt = 1; attempt <= opts.runsPerCase; attempt++) {
     for (let index = 0; index < cases.length; index++) tasks.push({ index, attempt });
   }
-  const judgeSlots = new Semaphore(Math.max(1, opts.judgeConcurrency ?? 1));
+  const gate = new JudgeGate(opts.judgeConcurrency ?? 1, opts.judgeMinIntervalMs ?? 0, deps);
   let next = 0;
   const worker = async () => {
     for (;;) {
@@ -279,7 +390,7 @@ export async function runCases(
       const rc = cases[task.index];
       const record = records[task.index];
       if (!rc || !record) return;
-      const run = await runOnce(rc, task.attempt, opts, deps, judgeSlots);
+      const run = await runOnce(rc, task.attempt, opts, deps, gate);
       record.runs.push(run);
       deps.onRunDone?.(rc.case.id, run);
     }

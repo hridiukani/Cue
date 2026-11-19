@@ -1,6 +1,12 @@
 import type { TokenUsage } from '@cue/suggest';
 import type { CheckResult } from './checks';
-import type { JudgeVerdict } from './judge';
+import {
+  DEFAULT_JUDGE_SETTINGS,
+  type JudgeSettings,
+  judgeSettingsKey,
+  type JudgeVerdict,
+  type RateLimitInfo,
+} from './judge';
 import { percentile } from './latency';
 import { costUsd } from './pricing';
 import { isUngraded } from './scoring';
@@ -25,6 +31,12 @@ export interface RunRecord {
   overDeadline: boolean;
   usage: TokenUsage | null;
   judgeUsage: TokenUsage | null;
+  /** How the judge was asked (null if it wasn't). Missing in files saved before 2026-11-19. */
+  judgeSettings?: JudgeSettings | null;
+  /** The provider's 429 details when grading failed on a rate limit. */
+  judgeRateLimit?: RateLimitInfo | null;
+  /** Graded later by `pnpm eval rejudge` from the saved line (not regenerated). */
+  rejudged?: boolean;
 }
 
 export interface CaseRecord {
@@ -85,6 +97,11 @@ export interface RunSummary {
   /** Runs whose cost is in costPer1000Usd (it's an average over these). */
   costedRuns: number;
   judgeCostUsd: number | null;
+  /**
+   * How many graded runs each judge setting graded, keyed "effort/maxTokens".
+   * More than one key means mixed judge settings (e.g. after a rejudge).
+   */
+  gradedBy: Record<string, number>;
   byCategory: Record<
     string,
     { runs: number; graded: number; ungraded: number; passes: number; passRate: number | null }
@@ -225,6 +242,21 @@ export function summarizeRun(
       judgeCosts.length > 0 && judgeCosts.every((c) => c !== null)
         ? judgeCosts.reduce((a, b) => a + b, 0)
         : null,
+    gradedBy: countGradedBy(all),
     byCategory,
   };
+}
+
+/**
+ * Graded runs per judge setting ("medium/1024": 51, "low/512": 78). Runs saved
+ * before settings were recorded used the defaults of the time.
+ */
+function countGradedBy(runs: readonly RunRecord[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of runs) {
+    if (r.verdict === null) continue;
+    const key = judgeSettingsKey(r.judgeSettings ?? DEFAULT_JUDGE_SETTINGS);
+    out[key] = (out[key] ?? 0) + 1;
+  }
+  return out;
 }

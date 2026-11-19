@@ -4,7 +4,11 @@ import {
   buildJudgeMessages,
   GroqJudgeClient,
   JudgeHttpError,
+  judgeSettingsKey,
+  parseDuration,
+  parseRateLimit,
   parseVerdict,
+  REJUDGE_SETTINGS,
   STANDARD_MUST_NOT,
 } from './judge';
 
@@ -162,5 +166,103 @@ describe('GroqJudgeClient', () => {
     await expect(broken.complete([])).rejects.toBeInstanceOf(JudgeHttpError);
     const odd = mk(Response.json({ nope: true }));
     await expect(odd.complete([])).rejects.toThrow(/unexpected response/);
+  });
+
+  it('sends the configured reasoning effort and token budget', async () => {
+    let body: Record<string, unknown> = {};
+    const client = new GroqJudgeClient('openai/gpt-oss-120b', {
+      apiKey: 'k',
+      baseUrl: 'http://x',
+      settings: REJUDGE_SETTINGS,
+      fetch: (_url, init) => {
+        body = JSON.parse(init.body as string) as Record<string, unknown>;
+        return Promise.resolve(Response.json({ choices: [{ message: { content: '{}' } }] }));
+      },
+    });
+    await client.complete([]);
+    expect(body).toMatchObject({ reasoning_effort: 'low', max_completion_tokens: 512 });
+    expect(judgeSettingsKey(client.settings)).toBe('low/512');
+  });
+
+  it('says which limit a 429 hit, from the provider message, without the org id', async () => {
+    const res = new Response(
+      JSON.stringify({
+        error: {
+          message:
+            'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_01abcDEF` service tier `on_demand` on tokens per day (TPD): Limit 200000, Used 199624, Requested 1543. Please try again in 8m12.345s. Need more tokens?',
+          type: 'tokens',
+          code: 'rate_limit_exceeded',
+        },
+      }),
+      {
+        status: 429,
+        headers: {
+          'retry-after': '493',
+          'x-ratelimit-limit-requests': '1000',
+          'x-ratelimit-remaining-requests': '612',
+          'x-ratelimit-limit-tokens': '8000',
+          'x-ratelimit-remaining-tokens': '7100',
+        },
+      },
+    );
+    const client = new GroqJudgeClient('m', {
+      apiKey: 'k',
+      baseUrl: 'http://x',
+      fetch: () => Promise.resolve(res),
+    });
+    const err: unknown = await client.complete([]).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(JudgeHttpError);
+    const e = err as JudgeHttpError;
+    expect(e.message).toBe('judge HTTP 429 (tokens per day)');
+    expect(e.rateLimit?.kind).toBe('tokens per day');
+    expect(e.rateLimit?.message).toContain('organization `org_…`');
+    expect(e.rateLimit?.message).not.toContain('org_01abcDEF');
+    expect(e.retryAfterMs).toBe(493_000); // the later of retry-after (493 s) and the message (492.3 s)
+    expect(e.rateLimit?.headers).toMatchObject({ limitRequests: '1000', remainingTokens: '7100' });
+  });
+});
+
+describe('parseRateLimit', () => {
+  const headers = (h: Record<string, string>) => new Headers(h);
+
+  it('reads the limit name from each kind of message', () => {
+    for (const [code, kind] of [
+      ['RPM', 'requests per minute'],
+      ['RPD', 'requests per day'],
+      ['TPM', 'tokens per minute'],
+      ['TPD', 'tokens per day'],
+    ] as const) {
+      const body = JSON.stringify({
+        error: { message: `Rate limit reached on x (${code}): Limit 1` },
+      });
+      expect(parseRateLimit(headers({}), body).kind).toBe(kind);
+    }
+  });
+
+  it('falls back to whichever remaining header is 0 when the body says nothing', () => {
+    expect(parseRateLimit(headers({ 'x-ratelimit-remaining-tokens': '0' }), '').kind).toBe(
+      'tokens per minute',
+    );
+    expect(parseRateLimit(headers({ 'x-ratelimit-remaining-requests': '0' }), 'oops').kind).toBe(
+      'requests per day',
+    );
+    expect(parseRateLimit(headers({}), '').kind).toBe('unknown');
+    expect(parseRateLimit(headers({}), '').retryAfterMs).toBeNull();
+  });
+
+  it('takes the wait from the message when there is no retry-after header', () => {
+    const body = JSON.stringify({ error: { message: 'x (TPM): Please try again in 1m26.4s.' } });
+    expect(parseRateLimit(headers({}), body).retryAfterMs).toBe(86_400);
+  });
+});
+
+describe('parseDuration', () => {
+  it('reads Groq-style durations', () => {
+    expect(parseDuration('7.66s')).toBe(7660);
+    expect(parseDuration('1m26.4s')).toBe(86_400);
+    expect(parseDuration('2h3m')).toBe(7_380_000);
+    expect(parseDuration('450ms')).toBe(450);
+    expect(parseDuration('soon')).toBeNull();
+    expect(parseDuration('5s later')).toBeNull();
   });
 });
