@@ -165,11 +165,16 @@ Per-case license information is kept in each case's `source.license`. Current ca
 
 ## CI
 
-`.github/workflows/eval-smoke.yml` runs `pnpm eval --smoke --runs 3` on every pull request. That's 8 inline cases (Apache-2.0 only, so no database is needed), and the job fails if the pass rate is below the repository variable `EVAL_MIN_PASS_RATE`.
+Both workflows use the smoke subset: 8 inline cases × 3 runs, Apache-2.0 only, so no database is needed. Both need the repository secret `GROQ_API_KEY`. Each writes its report to the job summary and uploads its output as an artifact.
 
-It needs the repository secret `GROQ_API_KEY`. Pull requests from forks don't get secrets, so for them the eval is skipped with a warning.
+| Workflow          | When                                 | What it runs                                        | Fails when                                                                      |
+| ----------------- | ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `eval-checks.yml` | every pull request                   | `pnpm eval checks --smoke`: deterministic, no judge | fewer than `EVAL_MIN_CHECKS_PASS_RATE` (default 0.30) of lines pass every check |
+| `eval-smoke.yml`  | manual only (Actions → Run workflow) | `pnpm eval --smoke` with the judge at low/512       | pass rate below `EVAL_MIN_PASS_RATE` (default 0.04), or more than 5% ungraded   |
 
-The report is written to the job summary, and the run file is uploaded as an artifact.
+**Why the judge doesn't run on every PR:** the judge's daily token limit (200,000 on our Groq account) is shared with local runs on the same key, and Groq counts each call's whole max-token budget against it. A judged job on every PR would spend that quota and fail at random with 429s.
+
+Pull requests from forks don't get secrets, so for them the checks are skipped with a warning.
 
 ## Changing the prompt or the judge
 

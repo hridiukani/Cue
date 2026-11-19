@@ -1,36 +1,57 @@
-# Runs the suggestion-quality smoke eval (packages/evals) on every pull request
-# and fails if the pass rate drops below the threshold.
+# The JUDGED smoke eval (packages/evals): quality of the smoke subset's lines,
+# graded by the LLM judge. MANUAL ONLY (Actions → "Suggestion eval (smoke,
+# judged)" → Run workflow), never on every pull request:
+# - the judge (openai/gpt-oss-120b on Groq) has a 200,000 tokens-per-day limit
+#   shared with local `pnpm eval` runs on the same key, and Groq counts each
+#   call's full max-token budget against it. A judge on every PR would spend
+#   that quota and fail at random with HTTP 429.
+# Every PR instead runs the deterministic checks without a judge: eval-checks.yml.
 #
-# Needs the repository secret GROQ_API_KEY. Pull requests from forks don't get
-# secrets, so for them the eval is skipped with a warning (never run with
-# pull_request_target: that would hand the key to untrusted code).
-# The threshold is the repository variable EVAL_MIN_PASS_RATE (default below).
+# It uses the quota-friendly judge settings (low effort, 512 tokens, one call
+# every 12 s): ~24 calls × ~1,200 tokens ≈ 29K tokens, about 15% of the daily
+# limit. It fails if more than 5% of lines are left ungraded (the pass rate
+# then can't be trusted) or if the pass rate is below the threshold.
 #
-# Why the default is so low (0.04 = fail only if none of the 24 lines pass):
-# the current prompt (suggest-v1) passes ~20-33% of lines (baseline
-# 2026-11-18: 33.3% over 129 runs; smoke 18.8% over 16). With 24 samples, a
-# threshold of 0.10 would fail ~1 PR in 7 on noise alone; 0.04 has ~0.6% false
-# alarms and still catches a broken prompt or pipeline. Raise it as the prompt
-# improves.
-name: Suggestion eval (smoke)
+# Needs the repository secret GROQ_API_KEY.
+# Threshold: the "min_pass_rate" input, else the repository variable
+# EVAL_MIN_PASS_RATE, else 0.04 (fail only if none of the 24 lines pass).
+# suggest-v1 passes 23-29% of judged smoke lines (saved runs 2026-11-18/19,
+# fully graded run: 7 of 24); at 26%, 0.04 false-alarms ~0.1% of the time and
+# still catches a broken prompt or pipeline. Raise it as the prompt improves.
+name: Suggestion eval (smoke, judged)
 
 on:
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      prompt_version:
+        description: Prompt version to evaluate (empty = the production default)
+        required: false
+        default: ''
+      runs:
+        description: Generations per case
+        required: false
+        default: '3'
+      min_pass_rate:
+        description: Fail below this pass rate, 0-1 (empty = EVAL_MIN_PASS_RATE or 0.04)
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: eval-smoke-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: eval-smoke # one judged run at a time: they share the judge's daily quota
+  cancel-in-progress: false
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 25 # 24 judge calls, paced by the provider's tokens-per-minute limit
+    timeout-minutes: 45 # 24 judge calls 12 s apart, plus waits for the provider's retry-after (up to 15 min)
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      MIN_PASS_RATE: ${{ vars.EVAL_MIN_PASS_RATE || '0.04' }}
+      MIN_PASS_RATE: ${{ inputs.min_pass_rate || vars.EVAL_MIN_PASS_RATE || '0.04' }}
+      PROMPT_VERSION: ${{ inputs.prompt_version }}
+      RUNS: ${{ inputs.runs || '3' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -46,20 +67,23 @@ jobs:
       - name: Validate the eval cases
         run: pnpm eval cases
 
-      - name: Skip (no API key)
+      - name: Fail (no API key)
         if: env.GROQ_API_KEY == ''
-        run: echo "::warning::GROQ_API_KEY is not available to this workflow (e.g. a pull request from a fork), so the suggestion eval was skipped."
+        run: |
+          echo "::error::The repository secret GROQ_API_KEY is not set, so the judged eval can't run."
+          exit 1
 
-      - name: Run the smoke eval
-        if: env.GROQ_API_KEY != ''
+      - name: Run the judged smoke eval
         run: >
-          pnpm eval --smoke --runs 3
+          pnpm eval --smoke --runs "$RUNS" --no-db
+          ${PROMPT_VERSION:+--prompt-version "$PROMPT_VERSION"}
+          --judge-effort low --judge-max-tokens 512 --judge-interval 12 --max-wait 900
           --min-pass-rate "$MIN_PASS_RATE"
           --json "$GITHUB_WORKSPACE/eval-smoke.json"
           --markdown "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the eval results
-        if: always() && env.GROQ_API_KEY != ''
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eval-smoke
