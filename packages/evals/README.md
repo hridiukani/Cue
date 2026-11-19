@@ -17,7 +17,8 @@ Each case runs N times, so you can see how much the results vary.
 ```sh
 pnpm eval                                   # all cases, 3 runs each, default model and prompt
 pnpm eval --model openai/gpt-oss-20b --prompt-version suggest-v1
-pnpm eval --smoke --runs 3                  # the small subset CI runs
+pnpm eval --smoke --runs 3                  # the judged smoke subset (manual CI workflow)
+pnpm eval checks --smoke --runs 3           # deterministic checks only, no judge (CI on every PR)
 pnpm eval --category price_objection --runs 5
 pnpm eval rejudge latest                    # grade the ungraded lines of a saved run (no regeneration)
 pnpm eval compare previous latest           # diff two saved runs, regressions first
@@ -46,6 +47,14 @@ You need `GROQ_API_KEY` in `.env`. Cases from datasets without a license also ne
 | `E`  | model error                           |
 | `w`  | waiting out a rate limit              |
 | `!`  | gave up waiting; the rest go ungraded |
+
+## Deterministic checks only: `pnpm eval checks`
+
+Generates lines exactly like `pnpm eval` (same prompt, model and settings) but scores them with the deterministic checks only: at most 20 words, one line, no preamble, no placeholders, no banned phrases. A model error fails the line.
+
+- **No judge:** it spends none of the judge's daily token quota and can't be failed by a judge rate limit. That makes it safe to run on every pull request.
+- **It is not a quality score.** It tells you the pipeline still produces lines a rep can say. Whether they're good needs the judge.
+- **Nothing is saved to `results/`.** Pass `--json <file>` to keep the lines, and `--min-pass-rate` to set the exit code.
 
 ## Re-grading ungraded lines: `pnpm eval rejudge <run>`
 

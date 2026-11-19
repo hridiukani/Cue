@@ -14,6 +14,7 @@ import { loadRootEnvFile } from '@cue/db/node';
 import { GroqClient, isKnownPromptVersion, PROMPT_VERSION, SYSTEM_PROMPTS } from '@cue/suggest';
 import { candidateToCaseSkeleton, findCandidates, type ScanRecording } from './candidates';
 import { CATEGORIES, type EvalCase, parseCases, sha256 } from './cases';
+import { checksProblems, formatChecks, runChecksOnly, summarizeChecks } from './checks-run';
 import { compareRuns } from './compare';
 import { loadEvalConfig, useColor } from './config';
 import {
@@ -49,6 +50,7 @@ const CANDIDATES_DIR = path.join(PACKAGE_ROOT, 'candidates');
 
 const USAGE = `Usage:
   pnpm eval [run] [options]          run the eval and save the result
+  pnpm eval checks [options]         generate lines, deterministic checks only (no judge; CI)
   pnpm eval rejudge <run>            grade a saved run's ungraded lines (nothing regenerated)
   pnpm eval compare <A> <B>          diff two saved runs (B = after)
   pnpm eval candidates [options]     scan imported calls for candidate moments
@@ -74,6 +76,14 @@ run options:
   --json <file>           also write the summary as JSON here
   --markdown <file>       append the report as Markdown (e.g. $GITHUB_STEP_SUMMARY)
   --no-db                 don't connect to the database (cases that need it are skipped)
+
+checks options (no judge, so no judge quota; nothing saved to results/):
+  --model, --prompt-version, --runs, --smoke, --case, --category, --no-db   as for run
+  --concurrency <n>       generations in parallel (default 2)
+  --max-wait <s>          longest model retry-after to wait out (default 120)
+  --min-pass-rate <0-1>   exit 1 if fewer lines than this pass every check
+  --json <file>           write the summary and every line as JSON here
+  --markdown <file>       append the report as Markdown
 
 rejudge options (writes a new results file; the original is kept):
   <run> is "latest", "previous", a file path, or the start of a file name in results/
@@ -168,47 +178,11 @@ async function cmdRun(argv: string[]): Promise<number> {
   }
   if (!config.groqApiKey) throw new Error('GROQ_API_KEY is not set (.env, or the CI secret).');
   const categories = values.category ?? null;
-  for (const c of categories ?? []) {
-    if (!(CATEGORIES as readonly string[]).includes(c))
-      throw new Error(`Unknown --category "${c}"`);
-  }
-
-  const { cases: all, sha } = await readCases();
-  const selected = all.filter(
-    (c) =>
-      (!values.smoke || c.smoke) &&
-      (!values.case || values.case.includes(c.id)) &&
-      (!categories || categories.includes(c.category)),
+  const { resolved, skipped, sha, close } = await loadSelectedCases(
+    { smoke: values.smoke, caseIds: values.case ?? null, categories, noDb: values['no-db'] },
+    config.databaseUrl,
   );
-  const unknownIds = (values.case ?? []).filter((id) => !all.some((c) => c.id === id));
-  if (unknownIds.length > 0) throw new Error(`Unknown --case: ${unknownIds.join(', ')}`);
-  if (selected.length === 0) throw new Error('No cases selected.');
-
-  const playbooks = parsePlaybooks(await readFile(PLAYBOOKS_FILE, 'utf8'));
-  const needsDb = selected.some((c) => c.window === null);
-  const conn = needsDb && !values['no-db'] ? connectDb(config.databaseUrl) : null;
   try {
-    const resolved: ResolvedCase[] = [];
-    const skipped: { caseId: string; reason: string }[] = [];
-    for (const c of selected) {
-      let r;
-      try {
-        r = await resolveCase(c, playbooks, conn ? dbLoader(conn.db) : null);
-      } catch (err) {
-        r = {
-          ok: false as const,
-          caseId: c.id,
-          reason: `database: ${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
-      if (r.ok) resolved.push(r.resolved);
-      else skipped.push({ caseId: r.caseId, reason: r.reason });
-    }
-    if (resolved.length === 0) {
-      console.error(skipped.map((s) => `${s.caseId}: ${s.reason}`).join('\n'));
-      throw new Error('Every selected case was skipped.');
-    }
-
     console.log(
       `Running ${String(resolved.length)} case(s) × ${String(runsPerCase)} with ${model} (prompt ${promptVersion}), judged by ${judgeModel}${skipped.length ? `; skipping ${String(skipped.length)}` : ''}`,
     );
@@ -294,7 +268,163 @@ async function cmdRun(argv: string[]): Promise<number> {
       runProblems(run.summary, { minPassRate, file: path.relative(process.cwd(), file) }),
     );
   } finally {
+    await close();
+  }
+}
+
+/** Pick the cases a run asked for and resolve their windows and playbooks. */
+async function loadSelectedCases(
+  sel: { smoke: boolean; caseIds: string[] | null; categories: string[] | null; noDb: boolean },
+  databaseUrl: string | undefined,
+): Promise<{
+  resolved: ResolvedCase[];
+  skipped: { caseId: string; reason: string }[];
+  sha: string;
+  close: () => Promise<void>;
+}> {
+  for (const c of sel.categories ?? []) {
+    if (!(CATEGORIES as readonly string[]).includes(c))
+      throw new Error(`Unknown --category "${c}"`);
+  }
+  const { cases: all, sha } = await readCases();
+  const selected = all.filter(
+    (c) =>
+      (!sel.smoke || c.smoke) &&
+      (!sel.caseIds || sel.caseIds.includes(c.id)) &&
+      (!sel.categories || sel.categories.includes(c.category)),
+  );
+  const unknownIds = (sel.caseIds ?? []).filter((id) => !all.some((c) => c.id === id));
+  if (unknownIds.length > 0) throw new Error(`Unknown --case: ${unknownIds.join(', ')}`);
+  if (selected.length === 0) throw new Error('No cases selected.');
+
+  const playbooks = parsePlaybooks(await readFile(PLAYBOOKS_FILE, 'utf8'));
+  const needsDb = selected.some((c) => c.window === null);
+  const conn = needsDb && !sel.noDb ? connectDb(databaseUrl) : null;
+  const close = async () => {
     await conn?.close();
+  };
+  try {
+    const resolved: ResolvedCase[] = [];
+    const skipped: { caseId: string; reason: string }[] = [];
+    for (const c of selected) {
+      let r;
+      try {
+        r = await resolveCase(c, playbooks, conn ? dbLoader(conn.db) : null);
+      } catch (err) {
+        r = {
+          ok: false as const,
+          caseId: c.id,
+          reason: `database: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      if (r.ok) resolved.push(r.resolved);
+      else skipped.push({ caseId: r.caseId, reason: r.reason });
+    }
+    if (resolved.length === 0) {
+      console.error(skipped.map((s) => `${s.caseId}: ${s.reason}`).join('\n'));
+      throw new Error('Every selected case was skipped.');
+    }
+    return { resolved, skipped, sha, close };
+  } catch (err) {
+    await close();
+    throw err;
+  }
+}
+
+// ------------------------------------------------------------------ checks
+
+async function cmdChecks(argv: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      model: { type: 'string' },
+      'prompt-version': { type: 'string' },
+      runs: { type: 'string' },
+      smoke: { type: 'boolean', default: false },
+      case: { type: 'string', multiple: true },
+      category: { type: 'string', multiple: true },
+      concurrency: { type: 'string' },
+      'max-wait': { type: 'string' },
+      'min-pass-rate': { type: 'string' },
+      json: { type: 'string' },
+      markdown: { type: 'string' },
+      'no-db': { type: 'boolean', default: false },
+    },
+    strict: true,
+  });
+  const config = loadEvalConfig();
+  const model = values.model ?? config.defaultModel;
+  const promptVersion = values['prompt-version'] ?? PROMPT_VERSION;
+  const runsPerCase = positiveInt(values.runs, '--runs', 3);
+  const concurrency = positiveInt(values.concurrency, '--concurrency', 2);
+  const maxWaitMs =
+    nonNegativeSeconds(values['max-wait'], '--max-wait', DEFAULT_MAX_WAIT_MS / 1000) * 1000;
+  const minPassRate =
+    values['min-pass-rate'] === undefined ? null : Number(values['min-pass-rate']);
+  if (minPassRate !== null && !(minPassRate >= 0 && minPassRate <= 1)) {
+    throw new Error('--min-pass-rate must be between 0 and 1');
+  }
+  if (!isKnownPromptVersion(promptVersion)) {
+    throw new Error(
+      `Unknown --prompt-version "${promptVersion}". Known: ${Object.keys(SYSTEM_PROMPTS).join(', ')}`,
+    );
+  }
+  if (!config.groqApiKey) throw new Error('GROQ_API_KEY is not set (.env, or the CI secret).');
+  const { resolved, skipped, close } = await loadSelectedCases(
+    {
+      smoke: values.smoke,
+      caseIds: values.case ?? null,
+      categories: values.category ?? null,
+      noDb: values['no-db'],
+    },
+    config.databaseUrl,
+  );
+  try {
+    console.log(
+      `Checking ${String(resolved.length)} case(s) × ${String(runsPerCase)} with ${model} (prompt ${promptVersion}), deterministic checks only${skipped.length ? `; skipping ${String(skipped.length)}` : ''}`,
+    );
+    const rateLimits = newRateLimitStats();
+    const lines = await runChecksOnly(
+      resolved,
+      { model, promptVersion, runsPerCase, concurrency, maxWaitMs },
+      {
+        llm: new GroqClient({ apiKey: config.groqApiKey, baseUrl: config.groqBaseUrl }),
+        now: () => performance.now(),
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        timeout: (ms) => AbortSignal.timeout(ms),
+        onRateLimited: rateLimitProgress(rateLimits),
+        onLineDone: (l) => process.stdout.write(l.error ? 'E' : l.pass ? '.' : 'F'),
+      },
+    );
+    const summary = summarizeChecks(lines);
+    const report = formatChecks(summary, lines, { model, promptVersion });
+    console.log(`\n\n${report}`);
+    printRateLimits(rateLimits);
+    for (const s of skipped) console.log(`Skipped ${s.caseId}: ${s.reason}`);
+    const out = (p: string | undefined) => (p ? path.resolve(config.invocationDir, p) : undefined);
+    const jsonOut = out(values.json);
+    const markdownOut = out(values.markdown);
+    if (jsonOut) {
+      await mkdir(path.dirname(jsonOut), { recursive: true });
+      const meta = {
+        createdAt: new Date().toISOString(),
+        git: await gitInfo(REPO_ROOT),
+        model,
+        promptVersion,
+        runsPerCase,
+        skipped,
+      };
+      await writeFile(jsonOut, `${JSON.stringify({ meta, summary, lines }, null, 2)}\n`);
+    }
+    if (markdownOut) {
+      await appendFile(
+        markdownOut,
+        `### Suggestion checks (no judge)\n\n\`\`\`text\n${report}\n\`\`\`\n`,
+      );
+    }
+    return reportProblems(checksProblems(summary, minPassRate));
+  } finally {
+    await close();
   }
 }
 
@@ -581,6 +711,8 @@ async function main(): Promise<number> {
   switch (first) {
     case 'rejudge':
       return cmdRejudge(rest);
+    case 'checks':
+      return cmdChecks(rest);
     case 'compare':
       return cmdCompare(rest);
     case 'candidates':

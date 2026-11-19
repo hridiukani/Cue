@@ -1,5 +1,6 @@
 export * from './cases';
 export * from './checks';
+export * from './checks-run';
 export * from './judge';
 export * from './latency';
 export * from './compare';

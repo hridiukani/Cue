@@ -163,12 +163,19 @@ export interface RunnerDeps {
   ) => void;
 }
 
-interface Generation {
+export interface Generation {
   raw: string;
   firstTokenMs: number | null;
   usage: TokenUsage | null;
   error: string | null;
 }
+
+/** What generating a line needs: no judge (`pnpm eval checks` runs without one). */
+export type GenerateDeps = Pick<RunnerDeps, 'llm' | 'now' | 'sleep' | 'timeout' | 'onRateLimited'>;
+export type GenerateOptions = Pick<
+  RunnerOptions,
+  'model' | 'promptVersion' | 'totalTimeoutMs' | 'maxRetries' | 'maxWaitMs'
+>;
 
 const retryDelay = (err: unknown): number | null => {
   if (err instanceof LlmError && err.kind === 'rate_limited')
@@ -180,10 +187,11 @@ const retryDelay = (err: unknown): number | null => {
 const minutes = (ms: number) =>
   ms >= 60_000 ? `${(ms / 60_000).toFixed(1)} min` : `${String(Math.round(ms / 1000))} s`;
 
-async function generate(
+/** One line from the model under test, exactly as production asks for it. */
+export async function generate(
   rc: ResolvedCase,
-  opts: RunnerOptions,
-  deps: RunnerDeps,
+  opts: GenerateOptions,
+  deps: GenerateDeps,
 ): Promise<Generation> {
   const { messages } = buildSuggestionMessages({
     playbook: rc.playbook,

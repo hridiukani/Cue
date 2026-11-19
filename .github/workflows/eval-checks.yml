@@ -1,0 +1,74 @@
+# Runs on every pull request: generates the smoke subset's lines with the
+# production prompt and scores them with the DETERMINISTIC checks only
+# (`pnpm eval checks`): at most 20 words, one line, no preamble, no
+# placeholders, no banned phrases. No LLM judge, so it spends none of the
+# judge's daily token quota and can't fail because the judge was rate limited.
+# Quality (the judged smoke run) is a manual workflow: eval-smoke.yml.
+#
+# Needs the repository secret GROQ_API_KEY for the model under test. Pull
+# requests from forks don't get secrets, so for them the step is skipped with a
+# warning (never use pull_request_target: it would hand the key to untrusted code).
+#
+# Threshold: the repository variable EVAL_MIN_CHECKS_PASS_RATE, default 0.30.
+# Calibrated 2026-11-19 from every saved run of the smoke subset on the
+# production prompt (suggest-v1) plus a real run of this exact command:
+# 54-67% of lines pass every check (13-16 of 24; 10 of 16), and the only check
+# that ever failed is max_words (0 preamble, multi-line, empty or placeholder
+# failures in 669 lines). At a true rate of 54%, a 0.30 threshold fails a PR on
+# noise alone about 1% of the time (binomial, 24 lines), and it
+# still catches a broken pipeline (empty lines, preambles, everything too long).
+# suggest-v2 passed 24 of 24: raise this to ~0.8 if production moves to v2.
+name: Suggestion checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # 24 generations, no judge
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MIN_PASS_RATE: ${{ vars.EVAL_MIN_CHECKS_PASS_RATE || '0.30' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Validate the eval cases
+        run: pnpm eval cases
+
+      - name: Skip (no API key)
+        if: env.GROQ_API_KEY == ''
+        run: echo "::warning::GROQ_API_KEY is not available to this workflow (e.g. a pull request from a fork), so the suggestion checks were skipped."
+
+      - name: Generate the smoke lines and run the deterministic checks
+        if: env.GROQ_API_KEY != ''
+        run: >
+          pnpm eval checks --smoke --runs 3 --no-db
+          --min-pass-rate "$MIN_PASS_RATE"
+          --json "$GITHUB_WORKSPACE/eval-checks.json"
+          --markdown "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the lines
+        if: always() && env.GROQ_API_KEY != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-checks
+          path: eval-checks.json
+          if-no-files-found: ignore
+          retention-days: 30
