@@ -7,6 +7,7 @@ import { gwenshapAdapter } from './adapters/gwenshap';
 import { saasAdapter } from './adapters/saas';
 import { loadIngestConfig } from './config';
 import { HfClient } from './hf-client';
+import { LICENSED_DATASETS, localOnlyViolation } from './local-only';
 import { runIngest } from './run';
 import type { AdapterKey, DatasetAdapter } from './types';
 
@@ -18,7 +19,9 @@ const ADAPTERS: Record<AdapterKey, DatasetAdapter> = {
 
 const USAGE = `Usage: pnpm ingest -- --dataset <name> [options]
 
-  --dataset <name>   real-sales | gwenshap | saas | all  (repeatable)
+  --dataset <name>   real-sales | gwenshap | saas | licensed | all  (repeatable)
+                     licensed = the Apache-2.0 ones (gwenshap + saas): what a deployment imports.
+                     real-sales (no stated license) only goes into a database on this machine.
   --limit <n>        max recordings per dataset (default: saas 300, others all)
   --max-scan <n>     max rows to scan when filtering locally (default 3000)
   --with-audio       also download original audio (real-sales, ~1 GB) into ./data/blobs
@@ -47,7 +50,9 @@ async function main(): Promise<number> {
     return values.help ? 0 : 1;
   }
 
-  const names = values.dataset.flatMap((d) => (d === 'all' ? Object.keys(ADAPTERS) : [d]));
+  const names = values.dataset.flatMap((d) =>
+    d === 'all' ? Object.keys(ADAPTERS) : d === 'licensed' ? [...LICENSED_DATASETS] : [d],
+  );
   const unknown = names.filter((n) => !(n in ADAPTERS));
   if (unknown.length) {
     console.error(`Unknown dataset(s): ${unknown.join(', ')}\n\n${USAGE}`);
@@ -62,6 +67,11 @@ async function main(): Promise<number> {
 
   loadRootEnvFile();
   const config = loadIngestConfig();
+  const refused = localOnlyViolation(names, config.databaseUrl);
+  if (refused) {
+    console.error(refused);
+    return 1;
+  }
   const { db, close } = createDb(config.databaseUrl);
   try {
     const summaries = await runIngest({
