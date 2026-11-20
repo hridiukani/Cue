@@ -8,12 +8,14 @@ import {
   MAX_SUGGESTION_WORDS,
   PROMPT_VERSION,
   PROMPT_VERSION_NO_PLAYBOOK,
+  PROMPT_VERSION_V1,
   PROMPT_VERSION_V2,
   type PlaybookForPrompt,
   renderPlaybook,
   slidingWindow,
   stripSuggestion,
   SYSTEM_PROMPT,
+  SYSTEM_PROMPT_V1,
   SYSTEM_PROMPT_V2,
   SYSTEM_PROMPTS,
   type WindowUtterance,
@@ -91,11 +93,24 @@ describe('buildSuggestionMessages', () => {
     ).toThrow(/Unknown prompt version "nope"\. Known: suggest-v1, suggest-v2/);
   });
 
-  it('keeps suggest-v1 byte-identical while adding suggest-v2 (old runs stay reproducible)', () => {
-    expect(PROMPT_VERSION).toBe('suggest-v1'); // production moves only after an eval compare
+  it('uses suggest-v2 in production and keeps suggest-v1 in the registry (old runs stay reproducible)', () => {
+    expect(PROMPT_VERSION).toBe('suggest-v2'); // moved after the 2026-11-20 eval compare
+    expect(PROMPT_VERSION_NO_PLAYBOOK).toBe('suggest-v2/no-playbook');
+    expect(SYSTEM_PROMPT).toBe(SYSTEM_PROMPT_V2);
     expect(Object.keys(SYSTEM_PROMPTS)).toEqual(['suggest-v1', 'suggest-v2']);
-    expect(SYSTEM_PROMPTS['suggest-v1']).toBe(SYSTEM_PROMPT);
+    expect(SYSTEM_PROMPTS[PROMPT_VERSION_V1]).toBe(SYSTEM_PROMPT_V1);
+    expect(SYSTEM_PROMPT_V1).toMatch(/^You are Cue, a real-time coach/);
     expect(SYSTEM_PROMPTS[PROMPT_VERSION_V2]).toBe(SYSTEM_PROMPT_V2);
+  });
+
+  it('still builds suggest-v1 on request', () => {
+    const { messages, promptVersion } = buildSuggestionMessages({
+      playbook: PLAYBOOK,
+      history: history(2),
+      promptVersion: PROMPT_VERSION_V1,
+    });
+    expect(promptVersion).toBe('suggest-v1');
+    expect(messages[0]?.content).toBe(SYSTEM_PROMPT_V1);
   });
 
   it('suggest-v2 states the word limit first and asks for a word-count self-check', () => {

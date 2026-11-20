@@ -12,13 +12,14 @@ import type { Speaker } from '@cue/shared';
  * Changing SYSTEM_PROMPT means bumping PROMPT_VERSION, so stored suggestions
  * always say which prompt produced them.
  */
-export const PROMPT_VERSION = 'suggest-v1';
-export const PROMPT_VERSION_NO_PLAYBOOK = 'suggest-v1/no-playbook';
 
 export const WINDOW_SIZE = 12;
 export const MAX_SUGGESTION_WORDS = 20;
 
-export const SYSTEM_PROMPT = `You are Cue, a real-time coach whispering to a sales rep during a live call.
+/** The first prompt (production 2026-11-17 to 2026-11-20). Kept so old runs stay reproducible. */
+export const PROMPT_VERSION_V1 = 'suggest-v1';
+
+export const SYSTEM_PROMPT_V1 = `You are Cue, a real-time coach whispering to a sales rep during a live call.
 The prospect just finished speaking. Write the ONE next line the rep should say.
 
 Rules:
@@ -37,8 +38,12 @@ Rules:
  *   in hidden tokens before answering, so it can actually count);
  * - price objections passed 0%: the line jumped to a question without
  *   acknowledging the concern. v2 says to acknowledge first, then redirect.
- * Registered for evals; production stays on PROMPT_VERSION until compare
- * shows v2 is better.
+ *
+ * Production default since 2026-11-20, after `pnpm eval compare` (43 cases × 3,
+ * every line graded): pass rate 43.4% → 62.0%, over-20-word lines 29 → 4 of
+ * 129, price objections 0% → 66.7%. Costs: first token p50/p95 +94/+200 ms
+ * (the self-check is hidden reasoning, ~11 → ~100 tokens), cost per 1,000
+ * +59%, and competitor cases fell 55.6% → 33.3%.
  */
 export const PROMPT_VERSION_V2 = 'suggest-v2';
 
@@ -57,13 +62,18 @@ Rules:
 
 Before you answer, count the words in your line. If there are more than ${String(MAX_SUGGESTION_WORDS)}, shorten it until there are ${String(MAX_SUGGESTION_WORDS)} or fewer.`;
 
+/** What production sends. Change it only after `pnpm eval compare` old vs new. */
+export const PROMPT_VERSION = PROMPT_VERSION_V2;
+export const PROMPT_VERSION_NO_PLAYBOOK = `${PROMPT_VERSION}/no-playbook`;
+export const SYSTEM_PROMPT = SYSTEM_PROMPT_V2;
+
 /**
  * Every system prompt by version. When SYSTEM_PROMPT changes, add the new
  * version here and keep the old entry, so `pnpm eval --prompt-version <old>`
  * can still compare it with the new one.
  */
 export const SYSTEM_PROMPTS: Readonly<Record<string, string>> = {
-  [PROMPT_VERSION]: SYSTEM_PROMPT,
+  [PROMPT_VERSION_V1]: SYSTEM_PROMPT_V1,
   [PROMPT_VERSION_V2]: SYSTEM_PROMPT_V2,
 };
 

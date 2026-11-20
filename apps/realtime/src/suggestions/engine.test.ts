@@ -154,7 +154,7 @@ describe('SuggestionEngine', () => {
     expect(row).toMatchObject({
       status: 'complete',
       model: 'test-model',
-      promptVersion: 'suggest-v1/no-playbook',
+      promptVersion: 'suggest-v2/no-playbook',
       utteranceEndAt: new Date(T0),
       requestSentAt: new Date(T0 + 20),
       firstTokenAt: new Date(T0 + 120),

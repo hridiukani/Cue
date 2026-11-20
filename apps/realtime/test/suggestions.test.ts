@@ -12,6 +12,7 @@ import {
   upsertDataset,
   upsertRecording,
 } from '@cue/db';
+import { SYSTEM_PROMPT } from '@cue/suggest';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import { Client, makeUser, startServer } from './helpers';
@@ -243,7 +244,7 @@ describe('suggestions end to end (replay + mocked LLM)', () => {
       expect(row).toMatchObject({
         status: 'complete',
         model: 'test-model',
-        promptVersion: 'suggest-v1',
+        promptVersion: 'suggest-v2',
         failureReason: null,
       });
       const timings = toSuggestionTimings(row ?? ({} as never));
@@ -264,7 +265,7 @@ describe('suggestions end to end (replay + mocked LLM)', () => {
         max_completion_tokens: 48,
       });
       const messages = req?.body.messages as { role: string; content: string }[];
-      expect(messages[0]?.content.startsWith('You are Cue')).toBe(true);
+      expect(messages[0]?.content).toBe(SYSTEM_PROMPT); // the production prompt (suggest-v2)
       expect(messages[1]?.content).toContain(
         '"Too expensive" → Compare it to the cost of manual matching.',
       );

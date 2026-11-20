@@ -3,7 +3,7 @@ import {
   type LlmClient,
   type LlmRequest,
   REASONING_MAX_TOKENS,
-  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_V1,
 } from '@cue/suggest';
 import { describe, expect, it } from 'vitest';
 import { parseCases } from './cases';
@@ -164,7 +164,7 @@ describe('runCases', () => {
     const llm = new FakeLlm(clock, [{}]);
     await runCases(makeCases(1), { ...OPTS, runsPerCase: 1 }, deps(llm, new FakeJudge(), clock));
     const req = llm.requests[0];
-    expect(req?.messages[0]?.content).toBe(SYSTEM_PROMPT);
+    expect(req?.messages[0]?.content).toBe(SYSTEM_PROMPT_V1);
     expect(req?.messages.at(-1)?.content).toContain('Prospect: Too expensive.');
     expect(req).toMatchObject({
       model: 'openai/gpt-oss-20b',
