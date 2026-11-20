@@ -16,15 +16,13 @@ import { candidateToCaseSkeleton, findCandidates, type ScanRecording } from './c
 import { CATEGORIES, type EvalCase, parseCases, sha256 } from './cases';
 import { checksProblems, formatChecks, runChecksOnly, summarizeChecks } from './checks-run';
 import { compareRuns } from './compare';
-import { loadEvalConfig, useColor } from './config';
+import { JUDGE_PINNED, loadEvalConfig, useColor } from './config';
 import {
-  DEFAULT_JUDGE_SETTINGS,
   GroqJudgeClient,
   JUDGE_VERSION,
   type JudgeSettings,
   judgeSettingsKey,
   type ReasoningEffort,
-  REJUDGE_SETTINGS,
 } from './judge';
 import { PRICING_SOURCE } from './pricing';
 import {
@@ -33,7 +31,7 @@ import {
   type RateLimitStats,
   recordRateLimit,
 } from './rate-limits';
-import { REJUDGE_INTERVAL_S, REJUDGE_MAX_WAIT_S, rejudgeRun } from './rejudge';
+import { REJUDGE_MAX_WAIT_S, rejudgeRun } from './rejudge';
 import { COLOR, formatCompare, formatRun, PLAIN } from './report';
 import { type LoadUtterances, parsePlaybooks, resolveCase, type ResolvedCase } from './resolve';
 import { gitInfo, loadRun, resolveRunRef, type RunFile, saveRun } from './results';
@@ -66,10 +64,12 @@ run options:
   --category <name>       only this category (repeatable): ${CATEGORIES.join(', ')}
   --concurrency <n>       generations in parallel (default 4)
   --judge-concurrency <n> judge calls in parallel (default 1; providers limit tokens per minute)
-  --judge-effort <e>      judge reasoning effort: low, medium, high (default medium)
-  --judge-max-tokens <n>  judge token budget, hidden reasoning included (default 1024)
-  --judge-interval <s>    at least this many seconds between judge calls (default 0)
-  --max-wait <s>          longest provider retry-after to wait out (default 120); a longer
+  The judge settings are pinned in src/config.ts (JUDGE_PINNED); these override them
+  for an experiment, and the run is then not comparable with pinned ones:
+  --judge-effort <e>      judge reasoning effort: low, medium, high (pinned ${JUDGE_PINNED.settings.reasoningEffort})
+  --judge-max-tokens <n>  judge token budget, hidden reasoning included (pinned ${String(JUDGE_PINNED.settings.maxCompletionTokens)})
+  --judge-interval <s>    at least this many seconds between judge calls (pinned ${String(JUDGE_PINNED.intervalS)})
+  --max-wait <s>          longest provider retry-after to wait out (pinned ${String(JUDGE_PINNED.maxWaitS)}); a longer
                           one leaves the remaining lines ungraded, for pnpm eval rejudge
   --min-pass-rate <0-1>   exit 1 if the pass rate is below this
                           (it also exits 1 if more than 5% of runs are ungraded)
@@ -87,10 +87,8 @@ checks options (no judge, so no judge quota; nothing saved to results/):
 
 rejudge options (writes a new results file; the original is kept):
   <run> is "latest", "previous", a file path, or the start of a file name in results/
-  --judge-effort <e>      default low
-  --judge-max-tokens <n>  default 512
-  --judge-interval <s>    default ${String(REJUDGE_INTERVAL_S)}
-  --max-wait <s>          default ${String(REJUDGE_MAX_WAIT_S)}
+  --judge-effort, --judge-max-tokens, --judge-interval   as for run (pinned in src/config.ts)
+  --max-wait <s>          default ${String(REJUDGE_MAX_WAIT_S)} (rejudge can afford to wait longer)
   --judge-concurrency <n> default 1
 
 compare options:
@@ -150,9 +148,9 @@ async function cmdRun(argv: string[]): Promise<number> {
     strict: true,
   });
   const judgeOpts = judgeFlags(values, {
-    settings: DEFAULT_JUDGE_SETTINGS,
-    intervalS: 0,
-    maxWaitS: DEFAULT_MAX_WAIT_MS / 1000,
+    settings: JUDGE_PINNED.settings,
+    intervalS: JUDGE_PINNED.intervalS,
+    maxWaitS: JUDGE_PINNED.maxWaitS,
   });
   const config = loadEvalConfig();
   const model = values.model ?? config.defaultModel;
@@ -463,15 +461,21 @@ function judgeFlags(
   const effort = values['judge-effort'] ?? defaults.settings.reasoningEffort;
   const reasoningEffort = EFFORTS.find((e) => e === effort);
   if (!reasoningEffort) throw new Error(`--judge-effort must be one of ${EFFORTS.join(', ')}`);
+  const settings: JudgeSettings = {
+    reasoningEffort,
+    maxCompletionTokens: positiveInt(
+      values['judge-max-tokens'],
+      '--judge-max-tokens',
+      defaults.settings.maxCompletionTokens,
+    ),
+  };
+  if (judgeSettingsKey(settings) !== judgeSettingsKey(JUDGE_PINNED.settings)) {
+    console.warn(
+      `Warning: judge settings ${judgeSettingsKey(settings)} differ from the pinned ${judgeSettingsKey(JUDGE_PINNED.settings)} (src/config.ts): verdicts won't be comparable with pinned runs.`,
+    );
+  }
   return {
-    settings: {
-      reasoningEffort,
-      maxCompletionTokens: positiveInt(
-        values['judge-max-tokens'],
-        '--judge-max-tokens',
-        defaults.settings.maxCompletionTokens,
-      ),
-    },
+    settings,
     intervalMs:
       nonNegativeSeconds(values['judge-interval'], '--judge-interval', defaults.intervalS) * 1000,
     maxWaitMs: nonNegativeSeconds(values['max-wait'], '--max-wait', defaults.maxWaitS) * 1000,
@@ -507,8 +511,8 @@ async function cmdRejudge(argv: string[]): Promise<number> {
   const [ref] = positionals;
   if (!ref || positionals.length > 1) throw new Error('Usage: pnpm eval rejudge <results file>');
   const judgeOpts = judgeFlags(values, {
-    settings: REJUDGE_SETTINGS,
-    intervalS: REJUDGE_INTERVAL_S,
+    settings: JUDGE_PINNED.settings,
+    intervalS: JUDGE_PINNED.intervalS,
     maxWaitS: REJUDGE_MAX_WAIT_S,
   });
   const judgeConcurrency = positiveInt(values['judge-concurrency'], '--judge-concurrency', 1);

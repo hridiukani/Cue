@@ -145,14 +145,15 @@ export interface JudgeSettings {
   maxCompletionTokens: number;
 }
 
-/** `pnpm eval`. The largest judge reply seen at medium effort was 656 tokens. */
-export const DEFAULT_JUDGE_SETTINGS: JudgeSettings = {
+/**
+ * What the judge used before settings were recorded per line (runs saved up to
+ * 2026-11-19). Only for reading old files; new runs use the settings pinned in
+ * config.ts (JUDGE_PINNED).
+ */
+export const LEGACY_JUDGE_SETTINGS: JudgeSettings = {
   reasoningEffort: 'medium',
   maxCompletionTokens: 1024,
 };
-
-/** `pnpm eval rejudge`: fewer tokens per call, so more calls fit under the provider's token limits. */
-export const REJUDGE_SETTINGS: JudgeSettings = { reasoningEffort: 'low', maxCompletionTokens: 512 };
 
 export const judgeSettingsKey = (s: JudgeSettings): string =>
   `${s.reasoningEffort}/${String(s.maxCompletionTokens)}`;
@@ -296,10 +297,10 @@ export class GroqJudgeClient implements JudgeClient {
       apiKey: string;
       baseUrl: string;
       fetch?: FetchFn;
-      settings?: JudgeSettings;
+      settings: JudgeSettings;
     },
   ) {
-    this.settings = opts.settings ?? DEFAULT_JUDGE_SETTINGS;
+    this.settings = opts.settings;
   }
 
   async complete(messages: ChatMessage[]): Promise<{ text: string; usage: TokenUsage | null }> {

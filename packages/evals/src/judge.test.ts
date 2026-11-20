@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { JUDGE_PINNED } from './config';
 import {
   allMustNot,
   buildJudgeMessages,
@@ -8,8 +9,8 @@ import {
   parseDuration,
   parseRateLimit,
   parseVerdict,
-  REJUDGE_SETTINGS,
   STANDARD_MUST_NOT,
+  LEGACY_JUDGE_SETTINGS,
 } from './judge';
 
 const verdictJson = (over: Record<string, unknown> = {}) =>
@@ -125,6 +126,7 @@ describe('GroqJudgeClient', () => {
     const client = new GroqJudgeClient('openai/gpt-oss-120b', {
       apiKey: 'k',
       baseUrl: 'http://groq.test/v1/',
+      settings: LEGACY_JUDGE_SETTINGS,
       fetch: (url, init) => {
         expect(url).toBe('http://groq.test/v1/chat/completions');
         body = JSON.parse(init.body as string) as Record<string, unknown>;
@@ -158,6 +160,7 @@ describe('GroqJudgeClient', () => {
       new GroqJudgeClient('m', {
         apiKey: 'k',
         baseUrl: 'http://x',
+        settings: JUDGE_PINNED.settings,
         fetch: () => Promise.resolve(res),
       });
     const limited = mk(new Response('', { status: 429, headers: { 'retry-after': '3' } }));
@@ -173,7 +176,7 @@ describe('GroqJudgeClient', () => {
     const client = new GroqJudgeClient('openai/gpt-oss-120b', {
       apiKey: 'k',
       baseUrl: 'http://x',
-      settings: REJUDGE_SETTINGS,
+      settings: JUDGE_PINNED.settings,
       fetch: (_url, init) => {
         body = JSON.parse(init.body as string) as Record<string, unknown>;
         return Promise.resolve(Response.json({ choices: [{ message: { content: '{}' } }] }));
@@ -208,6 +211,7 @@ describe('GroqJudgeClient', () => {
     const client = new GroqJudgeClient('m', {
       apiKey: 'k',
       baseUrl: 'http://x',
+      settings: JUDGE_PINNED.settings,
       fetch: () => Promise.resolve(res),
     });
     const err: unknown = await client.complete([]).catch((e: unknown) => e);

@@ -8,7 +8,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { parseCases } from './cases';
 import type { JudgeClient } from './judge';
-import { DEFAULT_JUDGE_SETTINGS, JudgeHttpError, STANDARD_MUST_NOT } from './judge';
+import { LEGACY_JUDGE_SETTINGS, JudgeHttpError, STANDARD_MUST_NOT } from './judge';
 import type { ResolvedCase } from './resolve';
 import {
   backoffMs,
@@ -75,7 +75,7 @@ const verdict = (score: number, violated = false) =>
 
 class FakeJudge implements JudgeClient {
   readonly model = 'judge-model';
-  readonly settings = DEFAULT_JUDGE_SETTINGS;
+  readonly settings = LEGACY_JUDGE_SETTINGS;
   calls = 0;
   constructor(private readonly answers: (string | Error)[] = [verdict(5)]) {}
   complete() {
@@ -289,7 +289,7 @@ describe('runCases', () => {
     let maxActive = 0;
     const slowJudge: JudgeClient = {
       model: 'judge-model',
-      settings: DEFAULT_JUDGE_SETTINGS,
+      settings: LEGACY_JUDGE_SETTINGS,
       async complete() {
         active++;
         maxActive = Math.max(maxActive, active);
@@ -497,6 +497,6 @@ describe('runCases with a spent daily quota', () => {
       { ...OPTS, runsPerCase: 1 },
       deps(new FakeLlm(clock, [{}]), new FakeJudge(), clock),
     );
-    expect(r?.runs[0]?.judgeSettings).toEqual(DEFAULT_JUDGE_SETTINGS);
+    expect(r?.runs[0]?.judgeSettings).toEqual(LEGACY_JUDGE_SETTINGS);
   });
 });

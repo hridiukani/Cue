@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { loadEvalConfig, useColor } from './config';
+import { JUDGE_PINNED, loadEvalConfig, useColor } from './config';
+import { judgeSettingsKey, LEGACY_JUDGE_SETTINGS } from './judge';
 
 describe('loadEvalConfig', () => {
   it('defaults to the production model and a different judge', () => {
@@ -40,5 +41,18 @@ describe('useColor', () => {
     expect(useColor(true, {})).toBe(true);
     expect(useColor(false, {})).toBe(false);
     expect(useColor(true, { NO_COLOR: '1' })).toBe(false);
+  });
+});
+
+describe('JUDGE_PINNED', () => {
+  it('pins one judge setting for every graded run (changing it means re-grading baselines)', () => {
+    expect(JUDGE_PINNED).toEqual({
+      settings: { reasoningEffort: 'low', maxCompletionTokens: 512 },
+      intervalS: 12,
+      maxWaitS: 120,
+    });
+    expect(judgeSettingsKey(JUDGE_PINNED.settings)).not.toBe(
+      judgeSettingsKey(LEGACY_JUDGE_SETTINGS),
+    );
   });
 });

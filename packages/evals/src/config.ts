@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { JudgeSettings } from './judge';
 
 // An empty value (e.g. 'GROQ_API_KEY=' copied from .env.example) means "not set".
 const optional = z
@@ -18,6 +19,36 @@ const EnvSchema = z.object({
   /** Set by pnpm to the folder the command was typed in (scripts run inside the package). */
   INIT_CWD: optional,
 });
+
+/**
+ * The judge settings every graded run uses (`pnpm eval`, `pnpm eval rejudge`,
+ * CI), pinned here so verdicts stay comparable across runs. Pinned 2026-11-20.
+ * Results files record the settings per line, and compare flags a change or a mix.
+ *
+ * - low effort, 512 tokens: Groq admits a call against its tokens-per-day limit
+ *   (200,000 for openai/gpt-oss-120b) by prompt + the FULL completion budget,
+ *   so 512 instead of 1,024 fits more calls a day. A low-effort reply used at
+ *   most 386 completion tokens in 164 graded lines (median call 1,205 tokens
+ *   in total, 2026-11-19/20).
+ * - one call every 12 s: 5 a minute × a median 1,205 tokens ≈ 6,000, under
+ *   the 8,000 tokens-per-minute limit (an unusually long minute is waited out).
+ * - wait out a retry-after of up to 120 s (a tokens-per-minute wait); a longer
+ *   one means the daily quota is spent, so the rest are left ungraded at once.
+ *
+ * Caveat: runs before 2026-11-19 were graded at medium/1024
+ * (LEGACY_JUDGE_SETTINGS). Low effort may grade more leniently, so compare
+ * runs graded with the same settings.
+ * Changing these is like changing the judge prompt: re-grade the baselines.
+ */
+export const JUDGE_PINNED: {
+  readonly settings: JudgeSettings;
+  readonly intervalS: number;
+  readonly maxWaitS: number;
+} = {
+  settings: { reasoningEffort: 'low', maxCompletionTokens: 512 },
+  intervalS: 12,
+  maxWaitS: 120,
+};
 
 export interface EvalConfig {
   groqApiKey: string | undefined;

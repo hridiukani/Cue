@@ -29,7 +29,9 @@ pnpm eval --help
 
 You need `GROQ_API_KEY` in `.env`. Cases from datasets without a license also need your local database with the calls imported (`docker compose up -d`, then `pnpm ingest -- --dataset real-sales`). Without them, those cases are skipped and listed as skipped.
 
-**How long it takes:** our Groq account allows 8,000 tokens per minute per model. A judge call uses about 1,500 tokens, so a full run (43 cases × 3 runs) takes roughly 25 minutes.
+**Judge settings are pinned** in `src/config.ts` (`JUDGE_PINNED`): low reasoning effort, a 512-token budget, one call every 12 s, and waits of up to 2 minutes for a retry-after. `pnpm eval`, `pnpm eval rejudge` and CI all use them, so verdicts from different runs are comparable. The `--judge-*` flags override them for an experiment, with a warning. Runs saved before 2026-11-19 were graded at medium/1024; compare those only with each other.
+
+**How long it takes:** our Groq account allows the judge (`openai/gpt-oss-120b`) 8,000 tokens per minute and **200,000 tokens per day**, and Groq counts each call's whole 512-token budget against them. A judge call uses about 1,200 tokens, so a full run (43 cases × 3 runs, 129 calls) takes about 30 minutes and spends about 155,000 tokens (129 × a median 1,205): most of a day's quota. Plan one full run a day.
 
 **Rate limits:**
 
@@ -66,17 +68,13 @@ pnpm eval rejudge results/20261119T001448Z_openai-gpt-oss-20b_suggest-v1.json
 
 This grades only the ungraded lines, from the lines the model already wrote. Nothing is regenerated, so the lines, latency and cost stay exactly as measured. The result is written to a new `…_rejudged.json`, and the original is kept.
 
-It is gentler on the judge's quota by default:
-
-- one call every 12 s, one at a time;
-- low reasoning effort and a 512-token budget;
-- waits of up to 15 minutes for a retry-after.
+It uses the pinned judge settings, one call at a time, and waits out a retry-after of up to 15 minutes (it runs locally and can afford to).
 
 Run it again later if it stopped at a daily limit.
 
 **Things to know:**
 
-- **Mixed judge settings.** Lines graded this way used different judge settings from the rest of the run, which can shift verdicts. The report and `compare` list the mix, for example `medium/1024 ×51, low/512 ×78`.
+- **Mixed judge settings.** Rejudging a run saved before the settings were pinned mixes them (its original lines were graded at medium/1024), which can shift verdicts. The report and `compare` list the mix, for example `medium/1024 ×51, low/512 ×78`.
 - **Changed rubrics are skipped.** A case whose rubric, playbook or window changed since the run is skipped, so one run never mixes two rubrics.
 
 ## What a run reports

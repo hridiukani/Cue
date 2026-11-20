@@ -19,13 +19,10 @@ import type { RunRecord } from './summary';
  */
 
 /**
- * Default pacing: one judge call every 12 s is 5 a minute. At low effort a
- * call is ~1,000 prompt tokens plus up to 512 completion tokens, so 5 a
- * minute stays under the 8,000 tokens-per-minute limit even when the
- * provider counts the full completion budget up front.
+ * Rejudge runs locally and can afford to wait: a retry-after of up to 15
+ * minutes is waited out (`pnpm eval` stops at JUDGE_PINNED.maxWaitS); a longer
+ * one means the daily quota is spent.
  */
-export const REJUDGE_INTERVAL_S = 12;
-/** Wait out a retry-after of up to 15 minutes; a longer one means a daily quota is spent. */
 export const REJUDGE_MAX_WAIT_S = 900;
 
 export interface RejudgeInfo {

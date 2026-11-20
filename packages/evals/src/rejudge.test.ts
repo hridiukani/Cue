@@ -1,13 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { JUDGE_PINNED } from './config';
 import { parseCases, rubricHash } from './cases';
 import { fakeRunFile } from './fixtures.test-helpers';
-import {
-  type JudgeClient,
-  JudgeHttpError,
-  type RateLimitInfo,
-  REJUDGE_SETTINGS,
-  STANDARD_MUST_NOT,
-} from './judge';
+import { type JudgeClient, JudgeHttpError, type RateLimitInfo, STANDARD_MUST_NOT } from './judge';
 import { describeRateLimits, newRateLimitStats, recordRateLimit } from './rate-limits';
 import { type ResolveById, rejudgeRun } from './rejudge';
 import type { ResolvedCase } from './resolve';
@@ -49,7 +44,7 @@ const verdictJson = (score: number) =>
 
 class ScriptedJudge implements JudgeClient {
   readonly model = 'openai/gpt-oss-120b';
-  readonly settings = REJUDGE_SETTINGS;
+  readonly settings = JUDGE_PINNED.settings;
   readonly seen: string[] = [];
   constructor(private readonly answers: (string | Error)[]) {}
   complete(messages: { role: string; content: string }[]) {
@@ -146,7 +141,7 @@ describe('rejudgeRun', () => {
       score: 5,
       judgeError: null,
       rejudged: true,
-      judgeSettings: REJUDGE_SETTINGS,
+      judgeSettings: JUDGE_PINNED.settings,
       // Untouched: the line, its latency and the model's tokens.
       shown: before[1]?.shown,
       firstTokenMs: before[1]?.firstTokenMs,
@@ -171,7 +166,7 @@ describe('rejudgeRun', () => {
     expect(run.meta.promptVersion).toBe(source.meta.promptVersion);
     expect(run.meta.rejudge).toMatchObject({
       of: { file: 'results/a.json', runId: source.meta.runId },
-      judgeSettings: REJUDGE_SETTINGS,
+      judgeSettings: JUDGE_PINNED.settings,
       git: { commit: 'feedface', dirty: false },
     });
     expect(runFileName(run.meta)).toBe(

@@ -1,7 +1,7 @@
 import type { TokenUsage } from '@cue/suggest';
 import type { CheckResult } from './checks';
 import {
-  DEFAULT_JUDGE_SETTINGS,
+  LEGACY_JUDGE_SETTINGS,
   type JudgeSettings,
   judgeSettingsKey,
   type JudgeVerdict,
@@ -255,7 +255,7 @@ function countGradedBy(runs: readonly RunRecord[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const r of runs) {
     if (r.verdict === null) continue;
-    const key = judgeSettingsKey(r.judgeSettings ?? DEFAULT_JUDGE_SETTINGS);
+    const key = judgeSettingsKey(r.judgeSettings ?? LEGACY_JUDGE_SETTINGS);
     out[key] = (out[key] ?? 0) + 1;
   }
   return out;
