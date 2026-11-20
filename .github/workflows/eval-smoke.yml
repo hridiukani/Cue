@@ -7,26 +7,30 @@
 #   that quota and fail at random with HTTP 429.
 # Every PR instead runs the deterministic checks without a judge: eval-checks.yml.
 #
-# It uses the quota-friendly judge settings (low effort, 512 tokens, one call
-# every 12 s): ~24 calls × ~1,200 tokens ≈ 29K tokens, about 15% of the daily
-# limit. It fails if more than 5% of lines are left ungraded (the pass rate
-# then can't be trusted) or if the pass rate is below the threshold.
+# Judge settings are pinned in packages/evals/src/config.ts (JUDGE_PINNED: low
+# effort, 512 tokens, one call every 12 s, wait out retry-afters of up to
+# 120 s), the same as local runs, so this run's verdicts compare with them.
+# ~24 calls × a median 1,205 tokens ≈ 29K tokens, about 15% of the daily limit.
+# It fails if more than 5% of lines are left ungraded (the pass rate then
+# can't be trusted) or if the pass rate is below the threshold.
 #
-# --max-wait 120: if local runs already spent the day's tokens, every judge
-# call gets a ~7-minute tokens-per-day retry-after. Waiting them all out took
-# ~2 hours locally (2026-11-20 smoke run: 22 such 429s), far past the job
-# timeout. With 120 s the job instead stops grading at once and fails with
+# Why the 120 s wait matters: if local runs already spent the day's tokens,
+# every judge call gets a ~7-minute tokens-per-day retry-after. Waiting them
+# all out took ~2 hours locally (2026-11-20 smoke run: 22 such 429s), far past
+# the job timeout. Instead the job stops grading at once and fails with
 # "N of 24 ungraded … tokens per day": run it again later, or `pnpm eval
 # rejudge` the uploaded results file locally.
 #
 # Needs the repository secret GROQ_API_KEY.
+#
 # Threshold: the "min_pass_rate" input, else the repository variable
-# EVAL_MIN_PASS_RATE, else 0.04 (fail only if none of the 24 lines pass).
-# Calibrated from a real smoke run of this exact command on the production
-# prompt (suggest-v1, 2026-11-20): 26.1% (6 of 23 graded; 1 ungraded), in line
-# with the saved runs (23-29%). At 26%, 0.04 false-alarms ~0.1% of the time and
-# still catches a broken prompt or pipeline. suggest-v2 passed 46-62%: raise
-# it to ~0.25 if production moves to v2.
+# EVAL_MIN_PASS_RATE, else 0.08 (fail if fewer than 2 of 24 lines pass).
+# Set from the real smoke run of this command (2026-11-20, suggest-v1, pinned
+# judge): 26.1%, 6 of 23 graded (1 ungraded). With a safety margin: the 95%
+# Wilson interval for 6/23 is 12.5%-46.5%, and 0.08 sits below its lower end.
+# False alarms (binomial, 24 lines): 0.7% at v1's 26%, ~3% even at 20%.
+# Production is moving to suggest-v2 (full eval 62.0% vs v1's 43.4%), so the margin
+# is wider still; after a judged smoke run of v2, consider raising this.
 name: Suggestion eval (smoke, judged)
 
 on:
@@ -41,7 +45,7 @@ on:
         required: false
         default: '3'
       min_pass_rate:
-        description: Fail below this pass rate, 0-1 (empty = EVAL_MIN_PASS_RATE or 0.04)
+        description: Fail below this pass rate, 0-1 (empty = EVAL_MIN_PASS_RATE or 0.08)
         required: false
         default: ''
 
@@ -58,7 +62,7 @@ jobs:
     timeout-minutes: 30 # 24 judge calls 12 s apart, plus per-minute waits (each up to 2 min)
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      MIN_PASS_RATE: ${{ inputs.min_pass_rate || vars.EVAL_MIN_PASS_RATE || '0.04' }}
+      MIN_PASS_RATE: ${{ inputs.min_pass_rate || vars.EVAL_MIN_PASS_RATE || '0.08' }}
       PROMPT_VERSION: ${{ inputs.prompt_version }}
       RUNS: ${{ inputs.runs || '3' }}
     steps:
@@ -86,7 +90,6 @@ jobs:
         run: >
           pnpm eval --smoke --runs "$RUNS" --no-db
           ${PROMPT_VERSION:+--prompt-version "$PROMPT_VERSION"}
-          --judge-effort low --judge-max-tokens 512 --judge-interval 12 --max-wait 120
           --min-pass-rate "$MIN_PASS_RATE"
           --json "$GITHUB_WORKSPACE/eval-smoke.json"
           --markdown "$GITHUB_STEP_SUMMARY"

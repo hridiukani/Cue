@@ -168,7 +168,7 @@ Both workflows use the smoke subset: 8 inline cases × 3 runs, Apache-2.0 only, 
 | Workflow          | When                                 | What it runs                                        | Fails when                                                                      |
 | ----------------- | ------------------------------------ | --------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `eval-checks.yml` | every pull request                   | `pnpm eval checks --smoke`: deterministic, no judge | fewer than `EVAL_MIN_CHECKS_PASS_RATE` (default 0.30) of lines pass every check |
-| `eval-smoke.yml`  | manual only (Actions → Run workflow) | `pnpm eval --smoke` with the judge at low/512       | pass rate below `EVAL_MIN_PASS_RATE` (default 0.04), or more than 5% ungraded   |
+| `eval-smoke.yml`  | manual only (Actions → Run workflow) | `pnpm eval --smoke` with the pinned judge (low/512) | pass rate below `EVAL_MIN_PASS_RATE` (default 0.08), or more than 5% ungraded   |
 
 **Why the judge doesn't run on every PR:** the judge's daily token limit (200,000 on our Groq account) is shared with local runs on the same key, and Groq counts each call's whole max-token budget against it. A judged job on every PR would spend that quota and fail at random with 429s.
 
