@@ -18,6 +18,7 @@ describe('parseServerConfig', () => {
       githubClientId: 'gh-id',
       githubClientSecret: 'gh-secret',
       realtimeTicketSecret: env.REALTIME_TICKET_SECRET,
+      audioPlayback: true,
       blobStoreDir: undefined,
     });
   });
@@ -34,6 +35,12 @@ describe('parseServerConfig', () => {
     expect(() => parseServerConfig({ ...env, DATABASE_POOL_MAX: 'many' })).toThrow(
       /DATABASE_POOL_MAX/,
     );
+  });
+
+  it('turns audio playback off with AUDIO_PLAYBACK=off (deployments host no audio)', () => {
+    expect(parseServerConfig({ ...env, AUDIO_PLAYBACK: 'off' }).audioPlayback).toBe(false);
+    expect(parseServerConfig({ ...env, AUDIO_PLAYBACK: 'on' }).audioPlayback).toBe(true);
+    expect(() => parseServerConfig({ ...env, AUDIO_PLAYBACK: 'maybe' })).toThrow(/AUDIO_PLAYBACK/);
   });
 
   it('rejects a short AUTH_SECRET', () => {

@@ -48,6 +48,9 @@ const ServerEnvSchema = z.object({
   REALTIME_TICKET_SECRET: z
     .string()
     .min(32, 'REALTIME_TICKET_SECRET must be at least 32 characters'),
+  // "off" in deployments: no recording audio is hosted (real-sales WAVs have no
+  // stated license). The audio route then always 404s and the page says so.
+  AUDIO_PLAYBACK: z.enum(['on', 'off']).default('on'),
   // Where `pnpm ingest --with-audio` stored recordings' audio. Empty = the default.
   BLOB_STORE_DIR: z
     .string()
@@ -63,6 +66,8 @@ export interface ServerConfig {
   githubClientId: string;
   githubClientSecret: string;
   realtimeTicketSecret: string;
+  /** False when AUDIO_PLAYBACK=off: recordings' audio is never served. */
+  audioPlayback: boolean;
   /** Unset means the repo's ./data/blobs (resolved in server/blobs.ts, not here: this file is also client code). */
   blobStoreDir: string | undefined;
 }
@@ -80,6 +85,7 @@ export function parseServerConfig(env: Record<string, string | undefined>): Serv
     githubClientId: e.AUTH_GITHUB_ID,
     githubClientSecret: e.AUTH_GITHUB_SECRET,
     realtimeTicketSecret: e.REALTIME_TICKET_SECRET,
+    audioPlayback: e.AUDIO_PLAYBACK === 'on',
     blobStoreDir: e.BLOB_STORE_DIR,
   };
 }

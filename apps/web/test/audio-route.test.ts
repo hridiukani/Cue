@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
   db: undefined as Db | undefined,
   blobs: undefined as LocalFsBlobStore | undefined,
   signedInAs: null as CurrentUser | null,
+  audioOn: true,
 }));
 
 vi.mock('@/server/db', () => ({
@@ -25,6 +26,7 @@ vi.mock('@/server/db', () => ({
   },
 }));
 vi.mock('@/server/blobs', () => ({
+  audioPlaybackEnabled: () => h.audioOn,
   getBlobStore: () => {
     if (!h.blobs) throw new Error('test blob store not ready');
     return h.blobs;
@@ -99,6 +101,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   h.signedInAs = { id: randomUUID(), email: 'rep@test.local', name: 'Rep' };
+  h.audioOn = true;
 });
 
 function get(id: string, headers: Record<string, string> = {}) {
@@ -118,6 +121,15 @@ describe('GET /api/recordings/:id/audio', () => {
     const res = await get(withAudio, { range: 'bytes=0-9' });
     expect(res.status).toBe(401);
     expect(res.headers.get('content-type')).toContain('application/json');
+  });
+
+  it('serves no audio at all when playback is off (AUDIO_PLAYBACK=off, deployments)', async () => {
+    h.audioOn = false;
+    const res = await get(withAudio, { range: 'bytes=0-9' });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+    h.signedInAs = null;
+    expect((await get(withAudio)).status).toBe(401); // signed out is still told to sign in
   });
 
   it('serves the whole file without a Range header and advertises range support', async () => {

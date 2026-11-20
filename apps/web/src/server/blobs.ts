@@ -5,6 +5,11 @@ import { serverConfig } from '@/config';
 
 const globalForBlobs = globalThis as unknown as { cueBlobs?: BlobStore };
 
+/** False when AUDIO_PLAYBACK=off (deployments): no recording audio is served at all. */
+export function audioPlaybackEnabled(): boolean {
+  return serverConfig().audioPlayback;
+}
+
 /**
  * The store `pnpm ingest --with-audio` wrote recordings' audio into.
  * Default: the repo's ./data/blobs. `pnpm dev` runs Next from apps/web, so

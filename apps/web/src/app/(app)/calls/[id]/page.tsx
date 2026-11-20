@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { Badge, TimingBadge } from '@/components/badges';
 import { publicConfig } from '@/config';
 import { formatDuration } from '@/lib/call-filters';
+import { audioPlaybackEnabled } from '@/server/blobs';
 import { getDb } from '@/server/db';
 import { requireUser } from '@/server/session';
 import { ReplayPlayer } from './replay-player';
@@ -16,10 +17,11 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
   const { id } = await params;
   // Recordings are a shared library (not user-owned); the replay session the
   // player creates is owned by this user.
+  const playAudio = audioPlaybackEnabled(); // off in deployments: no audio is hosted
   const [recording, playbooks, audio] = await Promise.all([
     getRecording(getDb(), id),
     listPlaybooks(getDb(), user.id), // only this user's playbooks
-    getRecordingAudio(getDb(), id),
+    playAudio ? getRecordingAudio(getDb(), id) : null,
   ]);
   if (!recording) notFound();
 
@@ -36,14 +38,19 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
           {audio ? (
             <Badge tone="blue">Audio</Badge>
           ) : (
-            recording.hasAudio && (
+            recording.hasAudio &&
+            (playAudio ? (
               <Badge
                 tone="amber"
                 title="Import with: pnpm ingest -- --dataset real-sales --with-audio"
               >
                 Audio not downloaded
               </Badge>
-            )
+            ) : (
+              <Badge tone="amber" title="This deployment hosts transcripts only">
+                Audio not hosted in this deployment
+              </Badge>
+            ))
           )}
           <span className="tabular-nums text-neutral-500">
             {formatDuration(recording.durationMs)}

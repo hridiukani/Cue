@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 import { getRecordingAudio } from '@cue/db';
 import { BlobNotFoundError } from '@cue/storage';
 import { parseRangeHeader } from '@/lib/http-range';
-import { getBlobStore } from '@/server/blobs';
+import { audioPlaybackEnabled, getBlobStore } from '@/server/blobs';
 import { getDb } from '@/server/db';
 import { getCurrentUser } from '@/server/session';
 
@@ -19,7 +19,8 @@ export const dynamic = 'force-dynamic';
  *   can't follow a sign-in page. Same check otherwise: cookie + user in the DB.)
  * - Recordings are a shared read-only library, so any signed-in user may play
  *   one. Datasets without a license (real-sales) stay behind login this way.
- * - Unknown id, no stored audio, or a missing file: 404, all the same.
+ * - Unknown id, no stored audio, a missing file, or audio playback turned off
+ *   (AUDIO_PLAYBACK=off, as in deployments): 404, all the same.
  * - `Cache-Control: private, no-store`: never kept by shared caches or on disk.
  */
 export async function GET(
@@ -56,6 +57,8 @@ async function serveAudio(request: Request, id: string, withBody: boolean): Prom
   if (!user) {
     return Response.json({ error: 'unauthorized' }, { status: 401, headers: BASE_HEADERS });
   }
+
+  if (!audioPlaybackEnabled()) return notFound();
 
   const audio = await getRecordingAudio(getDb(), id); // validates the id as a UUID
   if (!audio) return notFound();

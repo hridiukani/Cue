@@ -26,6 +26,8 @@ export function proxy(request: NextRequest, event: NextFetchEvent): Promise<Resp
 }
 
 export const config = {
-  // Everything except Auth.js's own routes and static assets.
-  matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico).*)'],
+  // Everything except Auth.js's own routes, static assets and robots.txt
+  // (crawlers must be able to read "disallow everything" without signing in).
+  // A literal: Next reads it at build time (imported constants are ignored).
+  matcher: ['/((?!api/auth|_next/static|_next/image|favicon.ico|robots.txt).*)'],
 };

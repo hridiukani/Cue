@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Workspace packages ship TypeScript source; let Next compile them.
   transpilePackages: ['@cue/db', '@cue/shared', '@cue/storage'],
+  // Keep every page out of search indexes (robots.txt says the same).
+  headers: () =>
+    Promise.resolve([
+      { source: '/:path*', headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }] },
+    ]),
 };
 
 export default nextConfig;
