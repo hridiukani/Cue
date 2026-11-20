@@ -1,0 +1,59 @@
+# Render Blueprint: the realtime server (apps/realtime) as a free web service.
+# Setup and the free-tier behaviour (spin-down after 15 minutes without
+# traffic, ~1 minute to wake): docs/deploy.md.
+#
+# Every secret is `sync: false`: Render asks for it when the Blueprint is
+# first applied, and it is never stored in this file.
+services:
+  - type: web
+    name: cue-realtime
+    runtime: node
+    plan: free
+    # Rebuild only when the realtime server or a package it uses changes.
+    buildFilter:
+      paths:
+        - apps/realtime/**
+        - packages/db/**
+        - packages/shared/**
+        - packages/suggest/**
+        - package.json
+        - pnpm-lock.yaml
+        - pnpm-workspace.yaml
+    # Node 20 bundles Corepack, which installs the pnpm version pinned in
+    # package.json "packageManager".
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    # Runs the TypeScript source with tsx, as in development (the packages
+    # have no build step).
+    startCommand: pnpm --filter @cue/realtime start
+    # Liveness only: never touches the database, so a paused Supabase project
+    # doesn't make Render restart the service. /health/ready checks the database.
+    healthCheckPath: /health
+    envVars:
+      # Without a pin, Render picks its newest Node (engines is ">=20.19").
+      - key: NODE_VERSION
+        value: '20.19'
+      - key: NODE_ENV
+        value: production
+      # Render routes to $PORT; listen on every interface, not just localhost.
+      - key: REALTIME_HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: info
+      # Supabase Session pooler (IPv4), port 5432, ?sslmode=require. Not the
+      # direct connection: it is IPv6-only and Render can't reach it.
+      - key: DATABASE_URL
+        sync: false
+      # Session mode holds one Postgres connection per client connection.
+      - key: DATABASE_POOL_MAX
+        value: '5'
+      # The same value as REALTIME_TICKET_SECRET on Vercel.
+      - key: REALTIME_TICKET_SECRET
+        sync: false
+      # The Vercel production URL, e.g. https://cue.vercel.app (no trailing slash).
+      - key: REALTIME_ALLOWED_ORIGINS
+        sync: false
+      # Optional: without it, replays run without suggestions.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
