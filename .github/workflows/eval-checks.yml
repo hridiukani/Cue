@@ -9,15 +9,14 @@
 # requests from forks don't get secrets, so for them the step is skipped with a
 # warning (never use pull_request_target: it would hand the key to untrusted code).
 #
-# Threshold: the repository variable EVAL_MIN_CHECKS_PASS_RATE, default 0.30.
-# Calibrated 2026-11-19 from every saved run of the smoke subset on the
-# production prompt (suggest-v1) plus a real run of this exact command:
-# 54-67% of lines pass every check (13-16 of 24; 10 of 16), and the only check
-# that ever failed is max_words (0 preamble, multi-line, empty or placeholder
-# failures in 669 lines). At a true rate of 54%, a 0.30 threshold fails a PR on
-# noise alone about 1% of the time (binomial, 24 lines), and it
-# still catches a broken pipeline (empty lines, preambles, everything too long).
-# suggest-v2 passed 24 of 24: raise this to ~0.8 if production moves to v2.
+# Threshold: the repository variable EVAL_MIN_CHECKS_PASS_RATE, default 0.70.
+# Calibrated 2026-11-20 for the production prompt suggest-v2 with real runs of
+# this exact command: 24 of 24 lines passed (twice: 48 of 48); the full eval
+# set passed 125 of 129 (96.9%; 95% Wilson lower bound 92%). With a safety
+# margin, 0.70 fails a PR on noise alone 0.2% of the time at a true 90% and
+# ~2% at 85% (binomial, 24 lines). It also catches a slide back to suggest-v1's
+# length problem (v1 passed 54-67%, only max_words failing) 85% of the time,
+# and any broken pipeline (empty lines, preambles, multi-line output).
 name: Suggestion checks
 
 on:
@@ -36,7 +35,7 @@ jobs:
     timeout-minutes: 10 # 24 generations, no judge
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      MIN_PASS_RATE: ${{ vars.EVAL_MIN_CHECKS_PASS_RATE || '0.30' }}
+      MIN_PASS_RATE: ${{ vars.EVAL_MIN_CHECKS_PASS_RATE || '0.70' }}
     steps:
       - uses: actions/checkout@v4
 
