@@ -18,6 +18,7 @@ describe('parseServerConfig', () => {
       githubClientId: 'gh-id',
       githubClientSecret: 'gh-secret',
       realtimeTicketSecret: env.REALTIME_TICKET_SECRET,
+      allowedGithubLogins: null,
       audioPlayback: true,
       blobStoreDir: undefined,
     });
@@ -41,6 +42,15 @@ describe('parseServerConfig', () => {
     expect(parseServerConfig({ ...env, AUDIO_PLAYBACK: 'off' }).audioPlayback).toBe(false);
     expect(parseServerConfig({ ...env, AUDIO_PLAYBACK: 'on' }).audioPlayback).toBe(true);
     expect(() => parseServerConfig({ ...env, AUDIO_PLAYBACK: 'maybe' })).toThrow(/AUDIO_PLAYBACK/);
+  });
+
+  it('reads ALLOWED_GITHUB_LOGINS (invite-only), and rejects an invalid login', () => {
+    expect(
+      parseServerConfig({ ...env, ALLOWED_GITHUB_LOGINS: 'Octocat, hubot' }).allowedGithubLogins,
+    ).toEqual(['octocat', 'hubot']);
+    expect(() => parseServerConfig({ ...env, ALLOWED_GITHUB_LOGINS: 'ok,not ok' })).toThrow(
+      /ALLOWED_GITHUB_LOGINS/,
+    );
   });
 
   it('rejects a short AUTH_SECRET', () => {

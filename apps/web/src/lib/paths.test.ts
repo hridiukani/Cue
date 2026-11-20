@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SIGNED_IN_PATH, isPublicPath, safeRedirectPath } from './paths';
 
 describe('isPublicPath', () => {
-  it('only treats the sign-in page as public', () => {
+  it('only treats the sign-in and invite-only pages as public', () => {
     expect(isPublicPath('/signin')).toBe(true);
+    expect(isPublicPath('/invite-only')).toBe(true);
     expect(isPublicPath('/playbooks')).toBe(false);
     expect(isPublicPath('/')).toBe(false);
     expect(isPublicPath('/signinx')).toBe(false);

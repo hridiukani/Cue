@@ -3,6 +3,8 @@ import { EmailAlreadyLinkedError, findOrCreateOAuthUser, type OAuthIdentity } fr
 import NextAuth from 'next-auth';
 import { z } from 'zod';
 import { authConfig } from '@/auth.config';
+import { serverConfig } from '@/config';
+import { githubLoginFrom, INVITE_ONLY_PATH, isLoginAllowed } from '@/lib/access';
 import { getDb } from '@/server/db';
 
 /** Sign-in error codes shown on /signin (see app/signin/page.tsx). */
@@ -29,8 +31,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
       ...base.callbacks,
       // Runs once per sign-in. Creates the Cue user on first sign-in, or
       // refuses (with a readable reason) when that isn't safe.
-      async signIn({ account, user }) {
+      async signIn({ account, user, profile }) {
         if (!account) return false;
+        // Invite-only: refuse before a Cue user is ever created.
+        if (!isLoginAllowed(githubLoginFrom(profile), serverConfig().allowedGithubLogins)) {
+          return INVITE_ONLY_PATH;
+        }
         const identity = identityFrom(account, user);
         if (!identity) return `/signin?error=${SIGNIN_ERROR.noEmail}`;
         try {
@@ -45,8 +51,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
       },
       // On sign-in `account` is set: store the Cue user id in the encrypted
       // session cookie. On later requests, just pass the token through.
-      async jwt({ token, account, user }) {
+      async jwt({ token, account, user, profile }) {
         if (account) {
+          const login = githubLoginFrom(profile);
+          if (login) token.login = login;
           const identity = identityFrom(account, user);
           if (!identity) throw new Error('jwt callback: sign-in without email');
           token.uid = await findOrCreateOAuthUser(getDb(), identity);
@@ -56,6 +64,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
       session({ session, token }) {
         const uid = z.uuid().safeParse(token.uid);
         if (uid.success) session.user.id = uid.data;
+        const login = z.string().safeParse(token.login);
+        if (login.success) session.user.login = login.data;
         return session;
       },
     },

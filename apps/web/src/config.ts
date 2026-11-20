@@ -1,5 +1,6 @@
 import { DatabasePoolMaxSchema } from '@cue/shared';
 import { z } from 'zod';
+import { AllowedGithubLoginsSchema } from '@/lib/access';
 
 const PublicEnvSchema = z.object({
   NEXT_PUBLIC_REALTIME_URL: z
@@ -51,6 +52,9 @@ const ServerEnvSchema = z.object({
   // "off" in deployments: no recording audio is hosted (real-sales WAVs have no
   // stated license). The audio route then always 404s and the page says so.
   AUDIO_PLAYBACK: z.enum(['on', 'off']).default('on'),
+  // Optional, comma-separated GitHub logins. If set, only they may use the app;
+  // everyone else sees /invite-only. GitHub sign-in is otherwise open to anyone.
+  ALLOWED_GITHUB_LOGINS: AllowedGithubLoginsSchema,
   // Where `pnpm ingest --with-audio` stored recordings' audio. Empty = the default.
   BLOB_STORE_DIR: z
     .string()
@@ -66,6 +70,8 @@ export interface ServerConfig {
   githubClientId: string;
   githubClientSecret: string;
   realtimeTicketSecret: string;
+  /** Lowercased GitHub logins allowed to use the app; null = anyone who signs in. */
+  allowedGithubLogins: string[] | null;
   /** False when AUDIO_PLAYBACK=off: recordings' audio is never served. */
   audioPlayback: boolean;
   /** Unset means the repo's ./data/blobs (resolved in server/blobs.ts, not here: this file is also client code). */
@@ -85,6 +91,7 @@ export function parseServerConfig(env: Record<string, string | undefined>): Serv
     githubClientId: e.AUTH_GITHUB_ID,
     githubClientSecret: e.AUTH_GITHUB_SECRET,
     realtimeTicketSecret: e.REALTIME_TICKET_SECRET,
+    allowedGithubLogins: e.ALLOWED_GITHUB_LOGINS,
     audioPlayback: e.AUDIO_PLAYBACK === 'on',
     blobStoreDir: e.BLOB_STORE_DIR,
   };

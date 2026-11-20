@@ -1,5 +1,5 @@
 /** Routes reachable without signing in. Everything else requires a session. */
-const PUBLIC_PATHS = ['/signin'];
+const PUBLIC_PATHS = ['/signin', '/invite-only'];
 
 export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
