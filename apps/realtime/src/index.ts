@@ -4,7 +4,7 @@ import { buildServer } from './server';
 
 loadEnvFileIfPresent();
 const config = loadConfig();
-const { db, close: closeDb } = createDb(config.databaseUrl);
+const { db, close: closeDb } = createDb(config.databaseUrl, { max: config.databasePoolMax });
 const { app, manager } = buildServer(config, { db });
 
 const shutdown = (signal: NodeJS.Signals) => {

@@ -7,6 +7,7 @@ import { serverConfig } from '@/config';
 const globalForDb = globalThis as unknown as { cueDb?: Db };
 
 export function getDb(): Db {
-  globalForDb.cueDb ??= createDb(serverConfig().databaseUrl).db;
+  const { databaseUrl, databasePoolMax } = serverConfig();
+  globalForDb.cueDb ??= createDb(databaseUrl, { max: databasePoolMax }).db;
   return globalForDb.cueDb;
 }

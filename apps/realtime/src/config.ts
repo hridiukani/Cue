@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { DatabasePoolMaxSchema } from '@cue/shared';
 import { z } from 'zod';
 
 const postgresUrl = z
@@ -19,6 +20,7 @@ const EnvSchema = z.object({
   REALTIME_PORT: z.coerce.number().int().min(0).max(65_535).default(4000),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   DATABASE_URL: postgresUrl,
+  DATABASE_POOL_MAX: DatabasePoolMaxSchema,
   // Shared with apps/web, which signs the WebSocket tickets.
   REALTIME_TICKET_SECRET: z
     .string()
@@ -51,6 +53,8 @@ export interface RealtimeConfig {
   port: number;
   logLevel: Env['LOG_LEVEL'];
   databaseUrl: string;
+  /** Undefined = the driver's default. */
+  databasePoolMax: number | undefined;
   ticketSecret: string;
   allowedOrigins: string[];
   groq: { apiKey: string | undefined; model: string; baseUrl: string };
@@ -79,6 +83,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: e.REALTIME_PORT,
     logLevel: e.LOG_LEVEL,
     databaseUrl: e.DATABASE_URL,
+    databasePoolMax: e.DATABASE_POOL_MAX,
     ticketSecret: e.REALTIME_TICKET_SECRET,
     allowedOrigins: e.REALTIME_ALLOWED_ORIGINS,
     groq: { apiKey: e.GROQ_API_KEY, model: e.GROQ_MODEL, baseUrl: e.GROQ_BASE_URL },

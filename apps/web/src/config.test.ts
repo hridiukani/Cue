@@ -13,6 +13,7 @@ describe('parseServerConfig', () => {
   it('maps env vars to config', () => {
     expect(parseServerConfig(env)).toEqual({
       databaseUrl: env.DATABASE_URL,
+      databasePoolMax: undefined,
       authSecret: env.AUTH_SECRET,
       githubClientId: 'gh-id',
       githubClientSecret: 'gh-secret',
@@ -26,6 +27,13 @@ describe('parseServerConfig', () => {
       '/srv/blobs',
     );
     expect(parseServerConfig({ ...env, BLOB_STORE_DIR: '' }).blobStoreDir).toBeUndefined();
+  });
+
+  it('reads DATABASE_POOL_MAX (1 on Vercel)', () => {
+    expect(parseServerConfig({ ...env, DATABASE_POOL_MAX: '1' }).databasePoolMax).toBe(1);
+    expect(() => parseServerConfig({ ...env, DATABASE_POOL_MAX: 'many' })).toThrow(
+      /DATABASE_POOL_MAX/,
+    );
   });
 
   it('rejects a short AUTH_SECRET', () => {

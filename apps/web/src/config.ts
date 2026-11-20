@@ -1,3 +1,4 @@
+import { DatabasePoolMaxSchema } from '@cue/shared';
 import { z } from 'zod';
 
 const PublicEnvSchema = z.object({
@@ -37,6 +38,8 @@ const postgresUrl = z
 
 const ServerEnvSchema = z.object({
   DATABASE_URL: postgresUrl,
+  // Connections per server process; 1 on Vercel (each function instance has its own pool).
+  DATABASE_POOL_MAX: DatabasePoolMaxSchema,
   // Signs and encrypts session cookies. Generate with: npx auth secret
   AUTH_SECRET: z.string().min(32, 'AUTH_SECRET must be at least 32 characters'),
   AUTH_GITHUB_ID: z.string().min(1, 'AUTH_GITHUB_ID is required (GitHub OAuth app client id)'),
@@ -54,6 +57,8 @@ const ServerEnvSchema = z.object({
 
 export interface ServerConfig {
   databaseUrl: string;
+  /** Undefined = the driver's default. */
+  databasePoolMax: number | undefined;
   authSecret: string;
   githubClientId: string;
   githubClientSecret: string;
@@ -70,6 +75,7 @@ export function parseServerConfig(env: Record<string, string | undefined>): Serv
   const e = parsed.data;
   return {
     databaseUrl: e.DATABASE_URL,
+    databasePoolMax: e.DATABASE_POOL_MAX,
     authSecret: e.AUTH_SECRET,
     githubClientId: e.AUTH_GITHUB_ID,
     githubClientSecret: e.AUTH_GITHUB_SECRET,

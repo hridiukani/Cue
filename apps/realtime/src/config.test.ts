@@ -14,6 +14,7 @@ describe('loadConfig', () => {
       port: 4000,
       logLevel: 'info',
       databaseUrl: REQUIRED.DATABASE_URL,
+      databasePoolMax: undefined,
       ticketSecret: REQUIRED.REALTIME_TICKET_SECRET,
       allowedOrigins: ['http://localhost:3000'],
       groq: {
@@ -33,6 +34,11 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...REQUIRED, SUGGESTION_FIRST_TOKEN_TIMEOUT_MS: '5' })).toThrow(
       /SUGGESTION_FIRST_TOKEN_TIMEOUT_MS/,
     );
+  });
+
+  it('reads DATABASE_POOL_MAX (Supabase Session pooler: keep it small)', () => {
+    expect(loadConfig({ ...REQUIRED, DATABASE_POOL_MAX: '5' }).databasePoolMax).toBe(5);
+    expect(() => loadConfig({ ...REQUIRED, DATABASE_POOL_MAX: '0' })).toThrow(/DATABASE_POOL_MAX/);
   });
 
   it('coerces REALTIME_PORT from a string', () => {
