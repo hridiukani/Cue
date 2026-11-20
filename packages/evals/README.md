@@ -174,13 +174,40 @@ Both workflows use the smoke subset: 8 inline cases × 3 runs, Apache-2.0 only, 
 
 Pull requests from forks don't get secrets, so for them the checks are skipped with a warning.
 
+## Current results: suggest-v1 vs suggest-v2
+
+Production uses **suggest-v2** since 2026-11-20. These are the numbers that decided it: `openai/gpt-oss-20b`, judge `openai/gpt-oss-120b` (judge-v1), 43 cases × 3 runs, every line graded. Reproduce with `pnpm eval compare 20261119T202127Z 20261120T054836Z` (the files are local: `results/` is gitignored).
+
+| Metric                       | suggest-v1      | suggest-v2     | Change            |
+| ---------------------------- | --------------- | -------------- | ----------------- |
+| Pass rate                    | 43.4% (56/129)  | 62.0% (80/129) | +18.6 pts         |
+| Mean score                   | 3.71            | 4.05           | +0.35             |
+| Lines over 20 words          | 29/129 (max 43) | 4/129 (max 22) |                   |
+| Price objections             | 0% (0/21)       | 66.7% (14/21)  |                   |
+| Competitor                   | 55.6% (10/18)   | 33.3% (6/18)   | worse             |
+| Stakeholder approval         | 61.9% (13/21)   | 52.4% (11/21)  | worse             |
+| First token p50 / p95        | 314 / 499 ms    | 408 / 699 ms   | +94 / +200 ms     |
+| Hidden reasoning, median     | 11 tokens       | 100 tokens     |                   |
+| Cost per 1,000 suggestions   | $0.0674         | $0.1070        | +59%              |
+| Smoke, deterministic checks  | 54.2% (13/24)   | 100% (24/24)   | CI threshold 0.70 |
+| Smoke, judged (pinned judge) | 26.1% (6/23)    | not run yet    | manual CI, 0.08   |
+
+**Caveats:**
+
+- **Mixed judge settings.** Both full runs were completed with `pnpm eval rejudge` before the settings were pinned: v1 is medium/1024 ×51 + low/512 ×78, v2 medium ×66 + low ×63. Within each setting v2 still wins (medium 37.3% → 53.0%, low 47.4% → 71.4%). Low effort looks more lenient, so these numbers aren't comparable with future runs at the pinned low/512.
+- **13 of 43 cases regressed** (21 improved). At N=3 one flipped run moves a case 33 points, so part of that is noise, but the competitor drop looks real (several cases went from 67–100% to 0%).
+- **The rubrics are DRAFT,** written by Claude. v2's "acknowledge first" rule matches the price rubrics' wording, so part of the price-objection gain may be the prompt fitting the rubric.
+- **Latency is model time in the harness,** not end to end; see [docs/latency.md](../../docs/latency.md).
+- **The judge is the same model family** as the model under test.
+- **Next:** run the judged smoke workflow on v2 to recalibrate its threshold, and look at the competitor cases.
+
 ## Changing the prompt or the judge
 
-- **The suggestion prompt** lives in `packages/suggest/src/prompt.ts`. To change it, add a new entry to `SYSTEM_PROMPTS` with a new version, keep the old one, then compare the two:
+- **The suggestion prompt** lives in `packages/suggest/src/prompt.ts`. `PROMPT_VERSION` is what production sends (today `suggest-v2`). To change it, add a new entry to `SYSTEM_PROMPTS` with a new version, keep the old one, then compare the two before moving `PROMPT_VERSION`:
 
   ```sh
-  pnpm eval --prompt-version suggest-v1
   pnpm eval --prompt-version suggest-v2
+  pnpm eval --prompt-version suggest-v3
   pnpm eval compare previous latest
   ```
 

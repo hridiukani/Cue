@@ -119,6 +119,20 @@ A single check on 2026-11-17 returned a full answer in about 300 ms. That's one 
 
 That's a different measurement from replay: there is no transcript emission, no database save and no browser. Report it as "model time to first token in the eval harness", never as end-to-end latency. Its cost-per-1,000 figure comes from the provider's own token counts, which include hidden reasoning tokens, multiplied by the prices in `packages/evals/src/pricing.ts`.
 
+## The prompt changes latency too (suggest-v2)
+
+On 2026-11-20 production moved from prompt `suggest-v1` to `suggest-v2`. v2 tells the model to count the words in its line before answering. The model does that counting in hidden reasoning tokens, before the first visible token, so `first_token` comes later:
+
+| Eval harness, gpt-oss-20b, 43 cases × 3 (model time) | suggest-v1 | suggest-v2 |
+| ---------------------------------------------------- | ---------- | ---------- |
+| First token p50 / p95                                | 314/499 ms | 408/699 ms |
+| Hidden reasoning tokens, median                      | 11         | 100        |
+| Over the 1.5 s deadline                              | 0          | 0          |
+
+- **About +94 ms p50 and +200 ms p95** of model time. End-to-end latency (`utterance_end` → `rendered_in_client`) grows by about the same, since the extra time sits between `suggestion_request_sent` and `first_token`.
+- **Measured in the eval harness, not end to end.** Confirm it with replays once there's a real end-to-end p50/p95.
+- **The trade:** v1 had 29 of 129 lines over 20 words, which production cut off mid-sentence; v2 had 4. The pass rate went from 43.4% to 62.0% (packages/evals/README.md).
+
 ## Measured numbers
 
 Only record numbers measured against a **real** provider, with the date, model and sample size. Numbers from the mock model used in tests and local smoke checks (fixed delays) are not latency results.
