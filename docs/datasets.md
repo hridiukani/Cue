@@ -23,7 +23,8 @@ Cue replays recorded sales calls through the realtime pipeline. The recordings c
 
 The `liva-ai/real-sales` dataset card doesn't state a license. Without one, we have no explicit permission to redistribute or publicly display its content. Therefore:
 
-- **Its transcripts and audio must stay behind login in any public deployment.** The app already requires sign-in for every page, including the call library, and the audio route (`/api/recordings/:id/audio`) answers 401 to signed-out requests. Don't add public or shareable views of these recordings, and don't publish them in demos, screenshots or exports.
+- **It is local-only: never import it into a deployed database.** Sign-in alone isn't enough there, because GitHub sign-in is open to anyone with a GitHub account. `pnpm ingest` refuses to import it into a database that isn't on this machine, including through `--dataset all`. A deployment imports `--dataset licensed` (gwenshap + saas) only; see [deploy.md](deploy.md).
+- **Locally it stays behind sign-in.** Every page requires sign-in, including the call library, and the audio route (`/api/recordings/:id/audio`) answers 401 to signed-out requests. Don't add public or shareable views of these recordings, and don't publish them in demos, screenshots or exports.
 - Use it for local development and evaluation only.
 - Revisit this if the publisher adds a license.
 
