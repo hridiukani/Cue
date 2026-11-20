@@ -10,6 +10,7 @@ import {
   createSuggestion,
   finishSuggestion,
   getSuggestion,
+  listSuggestionTimings,
   setSuggestionFeedback,
   setSuggestionRendered,
 } from '../src/repositories/suggestions';
@@ -160,5 +161,62 @@ describe('createReplaySession with a playbook', () => {
     });
     expect((await createReplaySession(db, alice, recordingId, 0, pb))?.playbookId).toBe(pb);
     expect(await createReplaySession(db, bob, recordingId, 0, pb)).toBeNull();
+  });
+});
+
+describe('listSuggestionTimings (the /latency page)', () => {
+  it("returns only the caller's own suggestions, newest first, never seed-fixture rows", async () => {
+    const alice = (await makeUser(db)).id;
+    const bob = (await makeUser(db)).id;
+    const sessionWithLine = async (userId: string) => {
+      const { recordingId } = await makeRecording(db, 1);
+      const s = await createReplaySession(db, userId, recordingId);
+      if (!s) throw new Error('no session');
+      const u = await appendSessionUtterance(db, userId, s.id, {
+        speaker: 'prospect',
+        text: 'Hmm.',
+        startedMs: 0,
+        endedMs: 500,
+        confidence: null,
+      });
+      if (!u) throw new Error('no utterance');
+      return { callId: s.id, utteranceId: u.id };
+    };
+    const add = async (userId: string, model: string, offsetMs: number) => {
+      const { callId, utteranceId } = await sessionWithLine(userId);
+      const id = randomUUID();
+      await createSuggestion(db, userId, {
+        id,
+        callId,
+        utteranceId,
+        model,
+        promptVersion: 'suggest-v2',
+        utteranceEndAt: t(offsetMs),
+        requestSentAt: t(offsetMs + 15),
+      });
+      await finishSuggestion(db, userId, id, {
+        status: 'complete',
+        text: 'Ask about budget.',
+        firstTokenAt: t(offsetMs + 400),
+        lastTokenAt: t(offsetMs + 500),
+      });
+      await setSuggestionRendered(db, userId, id, t(offsetMs + 530));
+      return id;
+    };
+    await add(alice, 'openai/gpt-oss-20b', 0);
+    await add(alice, 'seed-fixture', 1000); // invented demo timestamps: never reported
+    await add(alice, 'openai/gpt-oss-20b', 2000);
+    await add(bob, 'openai/gpt-oss-20b', 3000);
+
+    const rows = await listSuggestionTimings(db, alice);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.model === 'openai/gpt-oss-20b')).toBe(true);
+    expect(rows.map((r) => r.utteranceEndAt?.getTime())).toEqual([
+      t(2000).getTime(),
+      t(0).getTime(),
+    ]);
+    expect(rows[0]).toMatchObject({ status: 'complete', promptVersion: 'suggest-v2' });
+    expect(await listSuggestionTimings(db, randomUUID())).toEqual([]);
+    expect(await listSuggestionTimings(db, alice, { limit: 1 })).toHaveLength(1);
   });
 });

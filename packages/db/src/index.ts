@@ -58,8 +58,11 @@ export {
   createSuggestion,
   finishSuggestion,
   getSuggestion,
+  LATENCY_MAX_ROWS,
+  listSuggestionTimings,
   setSuggestionFeedback,
   setSuggestionRendered,
   type NewSuggestionInput,
   type SuggestionOutcome,
+  type SuggestionTimingRow,
 } from './repositories/suggestions';

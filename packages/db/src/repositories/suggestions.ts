@@ -1,7 +1,8 @@
 import type { FeedbackSignal, SuggestionFailureReason } from '@cue/shared';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../client';
+import { DEMO_SEED_MODEL } from '../seed-data';
 import { calls, type Suggestion, suggestionFeedback, suggestions } from '../schema';
 
 /**
@@ -161,4 +162,47 @@ export async function setSuggestionFeedback(
     const order: FeedbackSignal[] = ['thumbs_up', 'thumbs_down', 'used'];
     return order.filter((s) => rows.some((r) => r.signal === s));
   });
+}
+
+export interface SuggestionTimingRow {
+  status: Suggestion['status'];
+  failureReason: Suggestion['failureReason'];
+  model: string;
+  promptVersion: string;
+  utteranceEndAt: Date | null;
+  requestSentAt: Date | null;
+  firstTokenAt: Date | null;
+  lastTokenAt: Date | null;
+  clientRenderedAt: Date | null;
+}
+
+/** Most suggestions the latency page reads (newest first). */
+export const LATENCY_MAX_ROWS = 2000;
+
+/**
+ * The latency timestamps of this user's suggestions, newest first, for the
+ * /latency page. Seeded demo rows (model 'seed-fixture') have made-up
+ * timestamps, so they are always left out (CLAUDE.md: never report them).
+ */
+export async function listSuggestionTimings(
+  db: Db,
+  userId: string,
+  opts: { limit?: number } = {},
+): Promise<SuggestionTimingRow[]> {
+  return db
+    .select({
+      status: suggestions.status,
+      failureReason: suggestions.failureReason,
+      model: suggestions.model,
+      promptVersion: suggestions.promptVersion,
+      utteranceEndAt: suggestions.utteranceEndAt,
+      requestSentAt: suggestions.requestSentAt,
+      firstTokenAt: suggestions.firstTokenAt,
+      lastTokenAt: suggestions.lastTokenAt,
+      clientRenderedAt: suggestions.clientRenderedAt,
+    })
+    .from(suggestions)
+    .where(and(ownedBy(userId), notInArray(suggestions.model, [DEMO_SEED_MODEL])))
+    .orderBy(desc(suggestions.createdAt))
+    .limit(Math.min(opts.limit ?? LATENCY_MAX_ROWS, LATENCY_MAX_ROWS));
 }

@@ -28,6 +28,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               <Link href="/calls" className="text-neutral-600 hover:text-neutral-900">
                 Calls
               </Link>
+              <Link href="/latency" className="text-neutral-600 hover:text-neutral-900">
+                Latency
+              </Link>
             </nav>
           </div>
           <div className="flex min-w-0 items-center gap-3">
