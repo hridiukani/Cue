@@ -49,6 +49,26 @@ describe('GET /health (liveness)', () => {
   });
 });
 
+describe('GET /health CORS (the browser polls it to wake the server)', () => {
+  it('lets an allowed origin read it, and no one else', async () => {
+    const app = server();
+    const allowed = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'http://localhost:3000' },
+    });
+    expect(allowed.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+    expect(allowed.headers.vary).toBe('Origin');
+    const other = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'https://evil.example' },
+    });
+    expect(other.statusCode).toBe(200);
+    expect(other.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
 describe('GET /health/ready (readiness)', () => {
   it('is 200 when the database answers, and says whether suggestions are on', async () => {
     const res = await server({ checkDb: () => Promise.resolve(), llm: fakeLlm }).inject({

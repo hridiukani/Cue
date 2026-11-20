@@ -15,11 +15,27 @@ import {
   replayReducer,
   shouldReconnect,
 } from '@/lib/replay-state';
+import { healthUrlFor, waitForRealtime, type WakeDeps } from '@/lib/realtime-wake';
+
+const browserWakeDeps: WakeDeps = {
+  fetch: (url, init) => fetch(url, init),
+  now: () => performance.now(),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  schedule: (fn, ms) => {
+    const t = setTimeout(fn, ms);
+    return () => {
+      clearTimeout(t);
+    };
+  },
+  timeout: (ms) => AbortSignal.timeout(ms),
+};
 
 /**
  * Owns the realtime WebSocket for one replay page.
  *
- * - Every (re)connect fetches a fresh single-use ticket from a server action.
+ * - Every (re)connect first waits for the realtime server's /health (it may be
+ *   asleep on free hosting: a "waking" banner shows if that takes > 1.5 s),
+ *   then fetches a fresh single-use ticket from a server action.
  *   If the user is signed out, that action redirects to /signin.
  * - After `ready`: resume the current session if there is one, otherwise wait
  *   for the user to press Start.
@@ -65,6 +81,21 @@ export function useReplay(opts: {
     };
 
     async function connect(): Promise<void> {
+      const wake = await waitForRealtime(
+        healthUrlFor(wsUrl),
+        {
+          onSlow: () => {
+            dispatch({ type: 'waking' });
+          },
+          isCancelled: isDisposed,
+        },
+        browserWakeDeps,
+      );
+      if (wake === 'cancelled' || isDisposed()) return;
+      if (wake === 'timeout') {
+        dispatch({ type: 'wake_failed' });
+        return;
+      }
       dispatch({ type: 'connecting' });
       let ticket: string;
       try {

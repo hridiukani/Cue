@@ -254,3 +254,32 @@ describe('suggestions in the reducer', () => {
     expect(s.pastSuggestions).toEqual([]);
   });
 });
+
+describe('waking the realtime server', () => {
+  it('shows a waking banner, then clears it once connected', () => {
+    const waking = run([{ type: 'waking' }]);
+    expect(waking.connection).toBe('waking');
+    expect(waking.banner).toMatchObject({ level: 'info', kind: 'waking' });
+    expect(waking.banner?.message).toMatch(/up to a minute/);
+    const connecting = run([{ type: 'connecting' }], waking);
+    expect(connecting.connection).toBe('connecting');
+    expect(connecting.banner?.kind).toBe('waking'); // still waiting for the handshake
+    const ready = run([server({ type: 'ready', v: 1 })], connecting);
+    expect(ready.connection).toBe('open');
+    expect(ready.banner).toBeNull();
+  });
+
+  it('goes offline with a Reconnect button if the server never wakes', () => {
+    const s = run([{ type: 'waking' }, { type: 'wake_failed' }]);
+    expect(s.connection).toBe('offline');
+    expect(s.banner).toMatchObject({ level: 'error', action: 'reconnect' });
+  });
+
+  it('keeps an unrelated error banner when connecting succeeds', () => {
+    const withError: ReplayState = {
+      ...initialReplayState(60_000),
+      banner: { level: 'error', message: 'Saving failed', action: 'retry' },
+    };
+    expect(run([server({ type: 'ready', v: 1 })], withError).banner?.message).toBe('Saving failed');
+  });
+});

@@ -46,7 +46,15 @@ export function buildServer(config: RealtimeConfig, deps: ServerDeps): RealtimeS
 
   // Liveness: cheap and database-free on purpose. Render's health check calls
   // it, and a paused Supabase project must not make Render restart us in a loop.
-  app.get('/health', () => ({ status: 'ok' as const }));
+  // The browser polls it to wake a sleeping server before opening the
+  // WebSocket (apps/web realtime-wake.ts), so allowed origins may read it.
+  app.get('/health', (req, reply) => {
+    const origin = req.headers.origin;
+    if (origin !== undefined && config.allowedOrigins.includes(origin)) {
+      void reply.header('access-control-allow-origin', origin).header('vary', 'Origin');
+    }
+    return { status: 'ok' as const };
+  });
 
   // Readiness, for people and the wake-up checklist (docs/deploy.md): can we
   // reach the database, and are suggestions on? 503 if the database isn't.

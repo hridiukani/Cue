@@ -261,6 +261,7 @@ function Line({
 
 function ConnectionBadge({ state }: { state: ReplayState }) {
   const label = {
+    waking: 'Waking the server…',
     connecting: 'Connecting…',
     open: 'Connected',
     reconnecting: `Reconnecting (attempt ${String(state.attempt)})…`,
@@ -268,6 +269,7 @@ function ConnectionBadge({ state }: { state: ReplayState }) {
     not_found: 'Session ended',
   }[state.connection];
   const dot = {
+    waking: 'bg-sky-400 animate-pulse',
     connecting: 'bg-amber-400 animate-pulse',
     open: 'bg-emerald-500',
     reconnecting: 'bg-amber-400 animate-pulse',

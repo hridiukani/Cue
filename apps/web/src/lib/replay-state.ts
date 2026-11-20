@@ -16,6 +16,7 @@ import {
  */
 
 export type ConnectionStatus =
+  | 'waking' // the realtime server is starting (free hosting spins it down when idle)
   | 'connecting' // opening the socket / authenticating
   | 'open' // ready
   | 'reconnecting' // dropped; retrying with backoff
@@ -34,7 +35,12 @@ export interface Banner {
   message: string;
   /** What the banner's button does, if it has one. */
   action?: 'retry' | 'reconnect' | 'restart';
+  /** Set on the "waking" banner, so connecting can clear it. */
+  kind?: 'waking';
 }
+
+export const WAKING_MESSAGE =
+  'Waking the realtime server. On the free tier it sleeps when idle and can take up to a minute to start…';
 
 export interface SuggestionView {
   id: string;
@@ -81,6 +87,8 @@ export interface ReplayState {
 export type ReplayAction =
   | { type: 'server'; message: ServerMessage }
   | { type: 'connecting' }
+  | { type: 'waking' }
+  | { type: 'wake_failed' }
   | { type: 'socket_closed'; code: number; attempt: number; willRetry: boolean }
   | { type: 'gave_up' }
   | { type: 'dismiss_banner' }
@@ -129,6 +137,25 @@ function withoutInterim(interims: Record<string, InterimLine>, key: string) {
 
 export function replayReducer(state: ReplayState, action: ReplayAction): ReplayState {
   switch (action.type) {
+    case 'waking':
+      return {
+        ...state,
+        connection: 'waking',
+        banner: { level: 'info', message: WAKING_MESSAGE, kind: 'waking' },
+      };
+
+    case 'wake_failed':
+      return {
+        ...state,
+        connection: 'offline',
+        interims: {},
+        banner: {
+          level: 'error',
+          message: "The realtime server didn't start within 90 seconds.",
+          action: 'reconnect',
+        },
+      };
+
     case 'connecting':
       return {
         ...state,
@@ -196,8 +223,11 @@ function onServerMessage(state: ReplayState, m: ServerMessage): ReplayState {
         ...state,
         connection: 'open',
         attempt: 0,
-        // A reconnect banner is resolved once we're back.
-        banner: state.banner?.level === 'warning' ? null : state.banner,
+        // A reconnect or waking banner is resolved once we're back.
+        banner:
+          state.banner?.level === 'warning' || state.banner?.kind === 'waking'
+            ? null
+            : state.banner,
       };
 
     case 'session':
