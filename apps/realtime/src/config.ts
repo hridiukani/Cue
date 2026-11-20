@@ -17,7 +17,9 @@ const optionalSecret = z
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   REALTIME_HOST: z.string().min(1).default('localhost'),
-  REALTIME_PORT: z.coerce.number().int().min(0).max(65_535).default(4000),
+  REALTIME_PORT: z.coerce.number().int().min(0).max(65_535).optional(),
+  // Set by hosts like Render (the port they route traffic to). REALTIME_PORT wins if both are set.
+  PORT: z.coerce.number().int().min(0).max(65_535).optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   DATABASE_URL: postgresUrl,
   DATABASE_POOL_MAX: DatabasePoolMaxSchema,
@@ -80,7 +82,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   return {
     nodeEnv: e.NODE_ENV,
     host: e.REALTIME_HOST,
-    port: e.REALTIME_PORT,
+    port: e.REALTIME_PORT ?? e.PORT ?? 4000,
     logLevel: e.LOG_LEVEL,
     databaseUrl: e.DATABASE_URL,
     databasePoolMax: e.DATABASE_POOL_MAX,

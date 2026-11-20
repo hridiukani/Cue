@@ -45,6 +45,12 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...REQUIRED, REALTIME_PORT: '4100' }).port).toBe(4100);
   });
 
+  it("falls back to the host's PORT (Render), with REALTIME_PORT taking precedence", () => {
+    expect(loadConfig({ ...REQUIRED, PORT: '10000' }).port).toBe(10000);
+    expect(loadConfig({ ...REQUIRED, PORT: '10000', REALTIME_PORT: '4100' }).port).toBe(4100);
+    expect(() => loadConfig({ ...REQUIRED, PORT: 'abc' })).toThrow(/PORT/);
+  });
+
   it('rejects an invalid port', () => {
     expect(() => loadConfig({ ...REQUIRED, REALTIME_PORT: '99999' })).toThrow(/REALTIME_PORT/);
   });
