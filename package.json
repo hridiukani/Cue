@@ -16,9 +16,11 @@
     "db:generate": "pnpm --filter @cue/db db:generate",
     "db:migrate": "pnpm --filter @cue/db db:migrate",
     "db:seed": "pnpm --filter @cue/db db:seed",
+    "db:setup": "pnpm db:migrate && pnpm db:seed && pnpm ingest -- --dataset gwenshap",
     "db:studio": "pnpm --filter @cue/db db:studio",
     "ingest": "pnpm --filter @cue/ingest ingest",
-    "eval": "pnpm --filter @cue/evals eval"
+    "eval": "pnpm --filter @cue/evals eval",
+    "wake": "pnpm --filter @cue/realtime wake"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
