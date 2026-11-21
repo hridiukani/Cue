@@ -85,7 +85,25 @@ Why: in real calls the rep often says "mm-hmm" while the prospect is still talki
 
 What it does to the numbers: the timestamps don't change. Fewer suggestions are dropped as `cancelled_rep_spoke`, so more of them reach `last_token` and `rendered_in_client`, and the completed sample includes some that would have been cancelled before.
 
-Known limit: in replay, the duration comes from the transcript's own timestamps. Datasets with estimated timing (about 160 words per minute) make duration track word count, so the word limit decides most cases there.
+Known limit: in replay, the duration comes from the transcript's own timestamps (recording time, so at 2× the 1.5 s limit passes in 0.75 s of wall time).
+
+#### Recordings with estimated timing: rep speech never cancels
+
+On recordings with `timing = 'estimated'` (the text-only datasets, gwenshap and saas, which are the only ones in the deployment), **rep speech doesn't cancel suggestions at all** (since 2026-11-21). The switch is `repSpeechCanCancel(timing)` in `backchannel.ts`, passed to the engine as `cancelOnRepSpeech`. Recordings with real timing (real-sales) keep the rule above.
+
+**Why:**
+
+- **The rep's timing is invented.** Those transcripts have no timestamps. The importer gives every utterance 375 ms per word (at least 800 ms) with a fixed 600 ms between turns. So "the rep started talking" is an artefact of our estimate, not something a rep did.
+- **Cancelling would bias the latency sample.** At 1× the rep's reply starts 0.6 s after the prospect's line and crosses the 1.5 s limit about 2.1 s after it (about 1.05 s at 2×). The suggestions still streaming at that point are the slowest ones. Cancelling only those would leave the fast ones in the sample and make p95 look better than it is.
+
+**What still cancels on these recordings:** a newer prospect line, pause, seek, speed change, disconnect, and the 1.5 s first-token deadline.
+
+**Why not lengthen the estimated pause between turns instead:**
+
+- It would change the imported timeline for every turn, not just after prospect lines. That means dead air throughout the replay and longer recordings, and everything would have to be re-imported.
+- It would only move the bias, not remove it. Whatever the pause, the slowest suggestions would still be the ones cut off.
+
+**What it does to the numbers:** the timestamps are unchanged. On estimated recordings, no suggestion is dropped as `cancelled_rep_spoke`. Suggestions that used to be cancelled now complete, so the completed sample grows and its p95 includes the slow tail.
 
 A dropped suggestion is stored with `status = 'failed'` and its `failure_reason`, so p50 and p95 can be computed over completed suggestions while the drop rate is tracked separately. Report both: excluding drops makes latency look better than it is.
 

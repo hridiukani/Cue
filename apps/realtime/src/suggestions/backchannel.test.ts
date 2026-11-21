@@ -3,6 +3,7 @@ import {
   countWords,
   REP_CANCEL_MAX_MS,
   REP_CANCEL_MAX_WORDS,
+  repSpeechCanCancel,
   repSpeechCancelsSuggestion,
 } from './backchannel';
 
@@ -52,5 +53,14 @@ describe('repSpeechCancelsSuggestion', () => {
   it('counts words on whitespace and ignores empty text', () => {
     expect(countWords('  well,   okay   then ')).toBe(3);
     expect(countWords('')).toBe(0);
+  });
+});
+
+describe('repSpeechCanCancel', () => {
+  it('lets rep speech cancel only on recordings with real timing', () => {
+    expect(repSpeechCanCancel('real')).toBe(true);
+    // gwenshap/saas: start times and lengths are invented at import, so the
+    // rep "starting to talk" isn't evidence the rep took the turn.
+    expect(repSpeechCanCancel('estimated')).toBe(false);
   });
 });

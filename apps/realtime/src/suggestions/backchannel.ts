@@ -34,6 +34,23 @@ export function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
+/**
+ * Does rep speech cancel suggestions at all for this recording?
+ *
+ * Only when its timing is real. On `timing: 'estimated'` recordings (text-only
+ * datasets: gwenshap, saas) every utterance's start and length is invented at
+ * import (375 ms per word, a fixed 600 ms between turns; packages/ingest
+ * core.ts ESTIMATE), so "the rep started talking 600 ms later" is an artefact
+ * of our estimate, not something a rep did. Cancelling on it would also drop
+ * exactly the slowest suggestions (those still streaming ~2 s after the
+ * prospect stopped at 1x, ~1 s at 2x), which would bias the measured p95
+ * down. Every other cancel still applies there: a newer prospect line, pause,
+ * seek, speed change, disconnect, and the 1.5 s first-token deadline.
+ */
+export function repSpeechCanCancel(timing: 'real' | 'estimated'): boolean {
+  return timing === 'real';
+}
+
 /** True if this rep speech is substantial enough to cancel a suggestion. */
 export function repSpeechCancelsSuggestion(
   speech: RepSpeech,

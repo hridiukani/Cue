@@ -260,6 +260,29 @@ describe('SuggestionEngine', () => {
       expect(sent).toEqual([]);
     });
 
+    it('never cancels on rep speech when cancelOnRepSpeech is false (estimated timing)', async () => {
+      engine = new SuggestionEngine({
+        llm,
+        clock,
+        store,
+        send: (b) => sent.push(b),
+        config: { ...DEFAULT_SUGGESTION_CONFIG, model: 'test-model' },
+        playbook: null,
+        cancelOnRepSpeech: false,
+      });
+      prospect();
+      await flush();
+      expect(engine.inFlight).toBe(true);
+      expect(
+        engine.onRepSpeaking({ text: 'a long reply from the rep here', durationMs: 3000 }),
+      ).toBe(false);
+      expect(engine.inFlight).toBe(true);
+      expect(sent).not.toContainEqual(expect.objectContaining({ reason: 'cancelled_rep_spoke' }));
+      // Every other cancel still applies.
+      engine.cancel('cancelled_stopped');
+      expect(engine.inFlight).toBe(false);
+    });
+
     it('takes custom thresholds', async () => {
       engine = new SuggestionEngine({
         llm,

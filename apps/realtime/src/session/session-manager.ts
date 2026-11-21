@@ -24,6 +24,7 @@ import {
   SuggestionEngine,
   type SuggestionStore,
 } from '../suggestions/engine';
+import { repSpeechCanCancel } from '../suggestions/backchannel';
 import type { LlmClient, PlaybookForPrompt } from '@cue/suggest';
 import { ReplaySession, type SessionStore, utteranceSignature } from './replay-session';
 
@@ -147,6 +148,8 @@ export class SessionManager {
                     send,
                     config: { ...DEFAULT_SUGGESTION_CONFIG, ...config },
                     playbook,
+                    // Rep timing in estimated recordings is invented: it never cancels.
+                    cancelOnRepSpeech: repSpeechCanCancel(recording.timing),
                     log: this.log,
                   }),
               },

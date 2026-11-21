@@ -105,6 +105,11 @@ export class SuggestionEngine {
       playbook: PlaybookForPrompt | null;
       /** When rep speech counts as taking the turn. Defaults: > 4 words or > 1.5 s. */
       backchannel?: BackchannelThresholds;
+      /**
+       * Whether rep speech may cancel at all (default true). False for
+       * recordings with estimated timing: see repSpeechCanCancel().
+       */
+      cancelOnRepSpeech?: boolean;
       log?: { warn(obj: object, msg: string): void };
     },
   ) {}
@@ -138,6 +143,7 @@ export class SuggestionEngine {
    */
   onRepSpeaking(speech: RepSpeech): boolean {
     if (!this.current) return false;
+    if (this.deps.cancelOnRepSpeech === false) return false; // estimated timing: see backchannel.ts
     if (!repSpeechCancelsSuggestion(speech, this.deps.backchannel)) return false;
     this.cancel('cancelled_rep_spoke');
     return true;

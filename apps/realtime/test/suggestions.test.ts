@@ -126,12 +126,31 @@ const BACKCHANNEL = [
   { speaker: 'rep' as const, text: 'so here is the thing', startedMs: 9000, endedMs: 9300 },
 ];
 
+/**
+ * The rep replies with a real turn (8 words, 1.2 s) while the suggestion is
+ * still streaming. Imported twice: with real timing it cancels; with
+ * estimated timing (invented turn times) rep speech never cancels.
+ */
+const REP_REPLIES = [
+  { speaker: 'rep' as const, text: 'hi there', startedMs: 0, endedMs: 300 },
+  { speaker: 'prospect' as const, text: 'what does it cost', startedMs: 400, endedMs: 900 },
+  {
+    speaker: 'rep' as const,
+    text: 'it depends on how many invoices you process',
+    startedMs: 1200,
+    endedMs: 2400,
+  },
+  { speaker: 'prospect' as const, text: 'okay', startedMs: 9000, endedMs: 9300 },
+];
+
 let db: Db;
 let closeDb: () => Promise<void>;
 let mock: MockGroq;
 let conversationId: string;
 let silenceId: string;
 let backchannelId: string;
+let repRepliesRealId: string;
+let repRepliesEstimatedId: string;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = createDb(inject('testDatabaseUrl')));
@@ -143,12 +162,16 @@ beforeAll(async () => {
     license: 'mit',
     revision: null,
   });
-  const rec = (externalId: string, utterances: typeof CONVERSATION) =>
+  const rec = (
+    externalId: string,
+    utterances: typeof CONVERSATION,
+    timing: 'real' | 'estimated' = 'real',
+  ) =>
     upsertRecording(db, {
       datasetId,
       externalId,
       title: externalId,
-      timing: 'real',
+      timing,
       hasAudio: false,
       language: 'en',
       metadata: {},
@@ -157,6 +180,8 @@ beforeAll(async () => {
   conversationId = await rec('conversation', CONVERSATION);
   silenceId = await rec('long-silence', LONG_SILENCE);
   backchannelId = await rec('backchannel', BACKCHANNEL);
+  repRepliesRealId = await rec('rep-replies-real', REP_REPLIES, 'real');
+  repRepliesEstimatedId = await rec('rep-replies-estimated', REP_REPLIES, 'estimated');
   mock = new MockGroq();
   await mock.start();
 });
@@ -365,6 +390,46 @@ describe('suggestions end to end (replay + mocked LLM)', () => {
       await server.app.close();
     }
   });
+
+  it.each([
+    ['real', 'cancels', () => repRepliesRealId],
+    ['estimated', 'never cancels', () => repRepliesEstimatedId],
+  ] as const)(
+    'on a recording with %s timing, a real rep turn mid-suggestion %s it',
+    async (timing, _verb, id) => {
+      mock.behavior = {
+        firstTokenDelayMs: 100,
+        tokens: ['one ', 'two ', 'three ', 'four '],
+        gapMs: 300,
+      };
+      const { server, url } = await startWithGroq();
+      try {
+        const c = await new Client(url).hello(await makeUser(db));
+        c.send({ type: 'start', recordingId: id(), speed: '1x' });
+        // Prospect ends at 0.9 s; tokens stream until ~2.1 s; the rep talks 1.2-2.4 s.
+        if (timing === 'real') {
+          await c.waitFor(() => c.of('suggestionDropped').length === 1, 'dropped', 6000);
+          expect(c.of('suggestionDropped')[0]?.reason).toBe('cancelled_rep_spoke');
+          expect(c.of('suggestionCompleted')).toHaveLength(0);
+        } else {
+          await c.waitFor(() => c.of('suggestionCompleted').length === 1, 'completed', 6000);
+          // The rep really was mid-turn (> 4 words) while the suggestion streamed.
+          const types = c.messages.map((m) => m.type);
+          const completedAt = types.indexOf('suggestionCompleted');
+          const repTurnAt = c.messages.findIndex(
+            (m) => m.type === 'interim' && m.speaker === 'rep' && m.text.split(' ').length > 4,
+          );
+          expect(repTurnAt).toBeGreaterThan(types.indexOf('suggestionStarted'));
+          expect(repTurnAt).toBeLessThan(completedAt);
+          expect(c.of('suggestionDropped')).toHaveLength(0);
+          expect(c.of('suggestionCompleted')[0]?.text).toBe('one two three four');
+        }
+        c.close();
+      } finally {
+        await server.app.close();
+      }
+    },
+  );
 
   it('drops on a provider error instead of retrying', async () => {
     mock.behavior = { firstTokenDelayMs: 0, tokens: [], gapMs: 0, status: 429 };
