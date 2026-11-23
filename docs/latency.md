@@ -105,6 +105,28 @@ On recordings with `timing = 'estimated'` (the text-only datasets, gwenshap and 
 
 **What it does to the numbers:** the timestamps are unchanged. On estimated recordings, no suggestion is dropped as `cancelled_rep_spoke`. Suggestions that used to be cancelled now complete, so the completed sample grows and its p95 includes the slow tail.
 
+### Which prospect lines get a suggestion
+
+Since 2026-11-22, an **isolated short prospect reply** gets no suggestion. "Short" means **at most 3 words with no question mark**, for example "yeah", "okay sure" or "mm-hmm". There's nothing to answer, and a suggestion would only get in the rep's way.
+
+- **Three short replies in a row trigger a suggestion.** A prospect who keeps answering "yeah… sure… okay" is disengaging, which is exactly when the rep needs help (the eval has a "disengaged" category for this).
+  - The run counts prospect lines only. Rep lines in between don't break it.
+  - It resets after a substantive line, and after it triggers.
+- **Substantive lines trigger as before:** more than 3 words, or any line with a "?".
+- **A skipped reply doesn't cancel the suggestion in flight.** A prospect "mm-hmm" while the previous answer streams is the prospect-side twin of the rep backchannel rule. Every other cancel still applies.
+- **Where to change it:** `PROSPECT_SKIP_MAX_WORDS` (3) and `DISENGAGED_RUN_LENGTH` (3) in `apps/realtime/src/suggestions/prospect-trigger.ts`. The engine also accepts custom limits through its `prospectTrigger` option.
+- **The run lives in memory.** After a reconnect or server restart it starts again from 0.
+
+**Skips are recorded, not silent.** A skipped line gets a `suggestions` row with `status = 'skipped'` and `skip_reason = 'prospect_backchannel'`. Only `utterance_end_at` is set, because no request was sent. Nothing is sent to the browser.
+
+**What it does to the numbers:**
+
+- The five timestamps are unchanged for every requested suggestion.
+- **Skipped rows are never latency samples.** `/latency` leaves them out of the samples and out of the "of N suggestions" count, and shows them on a separate "Skipped" card, by reason.
+- **Fewer `cancelled_newer` drops.** A short reply used to cancel the suggestion still streaming for the previous line. It no longer does, so more suggestions complete.
+
+**The eval doesn't see this rule.** `pnpm eval` calls the prompt directly, never the realtime engine, so it grades a line for every case. 3 of the 6 "disengaged" cases end on an isolated short reply that production would now skip.
+
 A dropped suggestion is stored with `status = 'failed'` and its `failure_reason`, so p50 and p95 can be computed over completed suggestions while the drop rate is tracked separately. Report both: excluding drops makes latency look better than it is.
 
 ## Prompt caching
