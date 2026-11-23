@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { ServerMessageBody, Speed, SuggestionFailureReason } from '@cue/shared';
+import type {
+  ServerMessageBody,
+  Speed,
+  SuggestionFailureReason,
+  SuggestionSkipReason,
+} from '@cue/shared';
 import {
   buildSuggestionMessages,
   cleanSuggestion,
@@ -18,6 +23,11 @@ import {
   type RepSpeech,
   repSpeechCancelsSuggestion,
 } from './backchannel';
+import {
+  DEFAULT_PROSPECT_TRIGGER,
+  ProspectTrigger,
+  type ProspectTriggerThresholds,
+} from './prospect-trigger';
 
 /** Persistence for this session's suggestions, already scoped to its owner. */
 export interface SuggestionStore {
@@ -41,6 +51,15 @@ export interface SuggestionStore {
         },
   ): Promise<boolean>;
   rendered(id: string, at: Date): Promise<boolean>;
+  /** A prospect line that deliberately got no suggestion (status 'skipped'). */
+  skip(s: {
+    id: string;
+    utteranceId: string;
+    model: string;
+    promptVersion: string;
+    reason: SuggestionSkipReason;
+    utteranceEndAt: Date;
+  }): Promise<boolean>;
 }
 
 export interface SuggestionConfig {
@@ -77,6 +96,9 @@ interface Flight {
  * Generates at most ONE suggestion at a time for one session.
  *
  * - Triggered by a saved prospect final, at 1x or 2x only (never at instant).
+ *   An isolated short prospect reply (<= 3 words, no "?") is skipped and
+ *   recorded as 'skipped'; three in a row trigger (disengagement). See
+ *   ./prospect-trigger.ts. A skipped line doesn't cancel the one in flight.
  * - A newer prospect final, substantial rep speech (> 4 words or > 1.5 s; short
  *   backchannels don't count), or the session stopping cancels the suggestion
  *   in flight.
@@ -110,9 +132,15 @@ export class SuggestionEngine {
        * recordings with estimated timing: see repSpeechCanCancel().
        */
       cancelOnRepSpeech?: boolean;
+      /** Which prospect lines trigger. Defaults: skip <= 3 words without "?"; 3 in a row trigger. */
+      prospectTrigger?: ProspectTriggerThresholds;
       log?: { warn(obj: object, msg: string): void };
     },
-  ) {}
+  ) {
+    this.trigger = new ProspectTrigger(deps.prospectTrigger ?? DEFAULT_PROSPECT_TRIGGER);
+  }
+
+  private readonly trigger: ProspectTrigger;
 
   get inFlight(): boolean {
     return this.current !== null;
@@ -128,6 +156,12 @@ export class SuggestionEngine {
   }): void {
     if (input.speed === 'instant') {
       this.cancel('cancelled_stopped');
+      return;
+    }
+    const decision = this.trigger.decide(input.history.at(-1)?.text ?? '');
+    if (decision.kind === 'skip') {
+      // "yeah" while the previous answer streams: the suggestion in flight is still useful.
+      this.recordSkip(input, decision.reason);
       return;
     }
     if (this.deps.clock.now() < this.cooldownUntil) return; // rate limited: skip, don't queue
@@ -180,6 +214,32 @@ export class SuggestionEngine {
   }
 
   // ------------------------------------------------------------------ internals
+
+  /** Record the skip (no model request, nothing sent to the browser). */
+  private recordSkip(
+    input: { utteranceId: string; emittedAt: number; history: readonly WindowUtterance[] },
+    reason: SuggestionSkipReason,
+  ): void {
+    const { promptVersion } = buildSuggestionMessages({
+      playbook: this.deps.playbook,
+      history: input.history,
+    });
+    void this.track(
+      this.deps.store
+        .skip({
+          id: randomUUID(),
+          utteranceId: input.utteranceId,
+          model: this.deps.config.model,
+          promptVersion,
+          reason,
+          utteranceEndAt: new Date(input.emittedAt),
+        })
+        .catch((err: unknown) => {
+          this.deps.log?.warn({ err }, 'could not record a skipped suggestion');
+          return false;
+        }),
+    );
+  }
 
   private start(input: {
     utteranceId: string;

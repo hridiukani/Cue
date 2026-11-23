@@ -81,6 +81,10 @@ class MemoryStore implements SuggestionStore {
     Object.assign(row, outcome);
     return true;
   }
+  skip(s: Parameters<SuggestionStore['skip']>[0]) {
+    this.rows.set(s.id, { ...s, status: 'skipped' });
+    return Promise.resolve(true);
+  }
   rendered(id: string, at: Date) {
     const row = this.rows.get(id);
     // Like the real query: only a completed suggestion can get a render time.
@@ -101,6 +105,21 @@ const tokens = (parts: string[], everyMs = 50): Step[] =>
   parts.map((delta) => ({ afterMs: everyMs, delta }));
 const of = <T extends ServerMessageBody['type']>(type: T) =>
   sent.filter((m): m is Extract<ServerMessageBody, { type: T }> => m.type === type);
+
+/** A finalized prospect line with this text. */
+function prospectSays(text: string) {
+  engine.onProspectFinal({
+    utteranceId: randomUUID(),
+    emittedAt: clock.now(),
+    history: [
+      { speaker: 'rep', text: 'So how does that sound?' },
+      { speaker: 'prospect', text },
+    ],
+    speed: '1x',
+  });
+}
+
+const rowsWith = (status: string) => [...store.rows.values()].filter((r) => r.status === status);
 
 function prospect(speed: '1x' | '2x' | 'instant' = '1x') {
   engine.onProspectFinal({
@@ -296,6 +315,77 @@ describe('SuggestionEngine', () => {
       prospect();
       await flush();
       expect(engine.onRepSpeaking({ text: 'mm hmm', durationMs: 100 })).toBe(true);
+    });
+  });
+
+  describe('short prospect replies: skipped and recorded, unless they pile up', () => {
+    it('skips an isolated short reply: no model request, recorded with its reason', async () => {
+      prospectSays('yeah sure');
+      await flush();
+      expect(llm.requests).toHaveLength(0);
+      expect(of('suggestionStarted')).toHaveLength(0);
+      const [row] = rowsWith('skipped');
+      expect(row).toMatchObject({
+        reason: 'prospect_backchannel',
+        model: 'test-model',
+        promptVersion: 'suggest-v2/no-playbook',
+        utteranceEndAt: new Date(T0),
+      });
+    });
+
+    it('still triggers on a short question', async () => {
+      prospectSays('how much?');
+      await flush();
+      expect(llm.requests).toHaveLength(1);
+    });
+
+    it('triggers on the third short reply in a row (disengagement)', async () => {
+      prospectSays('yeah');
+      prospectSays('sure');
+      await flush();
+      expect(llm.requests).toHaveLength(0);
+      prospectSays('okay');
+      await flush();
+      expect(llm.requests).toHaveLength(1);
+      expect(rowsWith('skipped')).toHaveLength(2);
+    });
+
+    it('resets the run when a longer line arrives', async () => {
+      prospectSays('yeah');
+      prospectSays('sure');
+      prospectSays('we already use spreadsheets for this'); // substantive: triggers, resets
+      await flush();
+      expect(llm.requests).toHaveLength(1);
+      engine.cancel('cancelled_stopped');
+      prospectSays('okay'); // run is 1 again, not 3
+      await flush();
+      expect(llm.requests).toHaveLength(1);
+      expect(rowsWith('skipped')).toHaveLength(3);
+    });
+
+    it("doesn't cancel the suggestion in flight", async () => {
+      prospectSays('our current tool keeps failing');
+      await flush();
+      expect(engine.inFlight).toBe(true);
+      prospectSays('yeah');
+      await flush();
+      expect(engine.inFlight).toBe(true);
+      expect(of('suggestionDropped')).toHaveLength(0);
+    });
+
+    it('takes custom thresholds', async () => {
+      engine = new SuggestionEngine({
+        llm,
+        clock,
+        store,
+        send: (b) => sent.push(b),
+        config: { ...DEFAULT_SUGGESTION_CONFIG, model: 'test-model' },
+        playbook: null,
+        prospectTrigger: { maxShortWords: 1, disengagedRun: 2 },
+      });
+      prospectSays('okay sure'); // 2 words > 1: substantive
+      await flush();
+      expect(llm.requests).toHaveLength(1);
     });
   });
 

@@ -143,6 +143,27 @@ const REP_REPLIES = [
   { speaker: 'prospect' as const, text: 'okay', startedMs: 9000, endedMs: 9300 },
 ];
 
+/**
+ * Short prospect replies with rep lines in between: "yeah", "sure" are skipped
+ * (recorded as skipped), "okay" is the third short reply in a row and
+ * triggers (disengagement), and a substantive line later triggers as usual.
+ */
+const SHORT_REPLIES = [
+  { speaker: 'rep' as const, text: 'hi this is sam from tallyforge', startedMs: 0, endedMs: 300 },
+  { speaker: 'prospect' as const, text: 'yeah', startedMs: 400, endedMs: 600 },
+  { speaker: 'rep' as const, text: 'is now a good time', startedMs: 700, endedMs: 900 },
+  { speaker: 'prospect' as const, text: 'sure', startedMs: 1000, endedMs: 1200 },
+  { speaker: 'rep' as const, text: 'great let me explain', startedMs: 1300, endedMs: 1500 },
+  { speaker: 'prospect' as const, text: 'okay', startedMs: 1600, endedMs: 1800 },
+  {
+    speaker: 'prospect' as const,
+    text: 'we spend hours matching invoices every week',
+    startedMs: 5000,
+    endedMs: 5600,
+  },
+  { speaker: 'rep' as const, text: 'got it', startedMs: 9000, endedMs: 9200 },
+];
+
 let db: Db;
 let closeDb: () => Promise<void>;
 let mock: MockGroq;
@@ -151,6 +172,7 @@ let silenceId: string;
 let backchannelId: string;
 let repRepliesRealId: string;
 let repRepliesEstimatedId: string;
+let shortRepliesId: string;
 
 beforeAll(async () => {
   ({ db, close: closeDb } = createDb(inject('testDatabaseUrl')));
@@ -182,6 +204,7 @@ beforeAll(async () => {
   backchannelId = await rec('backchannel', BACKCHANNEL);
   repRepliesRealId = await rec('rep-replies-real', REP_REPLIES, 'real');
   repRepliesEstimatedId = await rec('rep-replies-estimated', REP_REPLIES, 'estimated');
+  shortRepliesId = await rec('short-replies', SHORT_REPLIES);
   mock = new MockGroq();
   await mock.start();
 });
@@ -430,6 +453,43 @@ describe('suggestions end to end (replay + mocked LLM)', () => {
       }
     },
   );
+
+  it('skips isolated short prospect replies (recorded), and triggers on a run of three', async () => {
+    mock.behavior = { firstTokenDelayMs: 40, tokens: ['Ask ', 'what changed.'], gapMs: 20 };
+    const { server, url } = await startWithGroq();
+    try {
+      const c = await new Client(url).hello(await makeUser(db));
+      c.send({ type: 'start', recordingId: shortRepliesId, speed: '2x' });
+      await c.waitFor(() => c.of('suggestionCompleted').length === 2, 'two completed', 8000);
+      // Exactly two model requests: the third short reply, and the substantive line.
+      expect(mock.requests).toHaveLength(2);
+      const finals = new Map(c.of('final').map((f) => [f.utteranceId, f.text]));
+      expect(c.of('suggestionStarted').map((m) => finals.get(m.utteranceId))).toEqual([
+        'okay',
+        'we spend hours matching invoices every week',
+      ]);
+      expect(c.of('suggestionDropped')).toHaveLength(0);
+
+      const sessionId = c.of('session')[0]?.sessionId ?? '';
+      const rows = await db
+        .select({
+          status: schema.suggestions.status,
+          skipReason: schema.suggestions.skipReason,
+          utteranceId: schema.suggestions.utteranceId,
+          requestSentAt: schema.suggestions.requestSentAt,
+        })
+        .from(schema.suggestions)
+        .where(eq(schema.suggestions.callId, sessionId));
+      const skipped = rows.filter((r) => r.status === 'skipped');
+      expect(skipped.map((r) => finals.get(r.utteranceId)).sort()).toEqual(['sure', 'yeah']);
+      expect(skipped.every((r) => r.skipReason === 'prospect_backchannel')).toBe(true);
+      expect(skipped.every((r) => r.requestSentAt === null)).toBe(true);
+      expect(rows.filter((r) => r.status === 'complete')).toHaveLength(2);
+      c.close();
+    } finally {
+      await server.app.close();
+    }
+  });
 
   it('drops on a provider error instead of retrying', async () => {
     mock.behavior = { firstTokenDelayMs: 0, tokens: [], gapMs: 0, status: 429 };

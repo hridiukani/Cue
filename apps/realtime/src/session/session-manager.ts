@@ -12,6 +12,7 @@ import {
   getSession,
   listSessionUtterances,
   type SessionUtterance,
+  recordSkippedSuggestion,
   setSuggestionRendered,
   updateSessionPosition,
 } from '@cue/db';
@@ -83,6 +84,7 @@ export class SessionManager {
       create: (s) => createSuggestion(this.db, userId, { ...s, callId }),
       finish: (id, outcome) => finishSuggestion(this.db, userId, id, outcome),
       rendered: (id, at) => setSuggestionRendered(this.db, userId, id, at),
+      skip: (s) => recordSkippedSuggestion(this.db, userId, { ...s, callId }),
     };
   }
 
