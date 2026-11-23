@@ -11,6 +11,7 @@ import {
   finishSuggestion,
   getSuggestion,
   listSuggestionTimings,
+  recordSkippedSuggestion,
   setSuggestionFeedback,
   setSuggestionRendered,
 } from '../src/repositories/suggestions';
@@ -218,5 +219,48 @@ describe('listSuggestionTimings (the /latency page)', () => {
     expect(rows[0]).toMatchObject({ status: 'complete', promptVersion: 'suggest-v2' });
     expect(await listSuggestionTimings(db, randomUUID())).toEqual([]);
     expect(await listSuggestionTimings(db, alice, { limit: 1 })).toHaveLength(1);
+  });
+});
+
+describe('recordSkippedSuggestion', () => {
+  it("records a skip on the owner's live session only, and the latency query reads it back", async () => {
+    const alice = (await makeUser(db)).id;
+    const bob = (await makeUser(db)).id;
+    const { recordingId } = await makeRecording(db, 1);
+    const s = await createReplaySession(db, alice, recordingId);
+    if (!s) throw new Error('no session');
+    const u = await appendSessionUtterance(db, alice, s.id, {
+      speaker: 'prospect',
+      text: 'yeah',
+      startedMs: 0,
+      endedMs: 400,
+      confidence: null,
+    });
+    if (!u) throw new Error('no utterance');
+    const input = (id = randomUUID()) => ({
+      id,
+      callId: s.id,
+      utteranceId: u.id,
+      model: 'openai/gpt-oss-20b',
+      promptVersion: 'suggest-v2/no-playbook',
+      reason: 'prospect_backchannel' as const,
+      utteranceEndAt: t(0),
+    });
+
+    expect(await recordSkippedSuggestion(db, bob, input())).toBe(false); // not bob's session
+    const id = randomUUID();
+    expect(await recordSkippedSuggestion(db, alice, input(id))).toBe(true);
+    expect(await getSuggestion(db, alice, id)).toMatchObject({
+      status: 'skipped',
+      skipReason: 'prospect_backchannel',
+      failureReason: null,
+      requestSentAt: null,
+      utteranceEndAt: t(0),
+    });
+    const [row] = await listSuggestionTimings(db, alice);
+    expect(row).toMatchObject({ status: 'skipped', skipReason: 'prospect_backchannel' });
+
+    await endSession(db, alice, s.id, 'ended', 400);
+    expect(await recordSkippedSuggestion(db, alice, input())).toBe(false); // ended session
   });
 });

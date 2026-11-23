@@ -1,4 +1,4 @@
-import type { FeedbackSignal, SuggestionFailureReason } from '@cue/shared';
+import type { FeedbackSignal, SuggestionFailureReason, SuggestionSkipReason } from '@cue/shared';
 import { and, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '../client';
@@ -45,6 +45,38 @@ export async function createSuggestion(
       (id, call_id, utterance_id, model, prompt_version, status, utterance_end_at, request_sent_at)
     select ${s.id}, ${calls.id}, ${s.utteranceId}, ${s.model}, ${s.promptVersion}, 'streaming',
            ${s.utteranceEndAt.toISOString()}::timestamptz, ${s.requestSentAt.toISOString()}::timestamptz
+    from ${calls}
+    where ${calls.id} = ${s.callId} and ${calls.userId} = ${userId} and ${calls.status} = 'live'
+    returning id`);
+  return rows.length === 1;
+}
+
+/**
+ * Record that a prospect line deliberately got no suggestion (status
+ * 'skipped', with the reason), so skips are counted instead of invisible. No
+ * request was sent: only utterance_end_at is set, and latency summaries leave
+ * these rows out of their samples. False if the session isn't the caller's
+ * live session.
+ */
+export async function recordSkippedSuggestion(
+  db: Db,
+  userId: string,
+  s: {
+    id: string;
+    callId: string;
+    utteranceId: string;
+    model: string;
+    promptVersion: string;
+    reason: SuggestionSkipReason;
+    utteranceEndAt: Date;
+  },
+): Promise<boolean> {
+  if (!isUuid(s.callId) || !isUuid(s.id)) return false;
+  const rows = await db.execute<{ id: string }>(sql`
+    insert into ${suggestions}
+      (id, call_id, utterance_id, model, prompt_version, status, skip_reason, utterance_end_at)
+    select ${s.id}, ${calls.id}, ${s.utteranceId}, ${s.model}, ${s.promptVersion}, 'skipped',
+           ${s.reason}, ${s.utteranceEndAt.toISOString()}::timestamptz
     from ${calls}
     where ${calls.id} = ${s.callId} and ${calls.userId} = ${userId} and ${calls.status} = 'live'
     returning id`);
@@ -167,6 +199,7 @@ export async function setSuggestionFeedback(
 export interface SuggestionTimingRow {
   status: Suggestion['status'];
   failureReason: Suggestion['failureReason'];
+  skipReason: Suggestion['skipReason'];
   model: string;
   promptVersion: string;
   utteranceEndAt: Date | null;
@@ -193,6 +226,7 @@ export async function listSuggestionTimings(
     .select({
       status: suggestions.status,
       failureReason: suggestions.failureReason,
+      skipReason: suggestions.skipReason,
       model: suggestions.model,
       promptVersion: suggestions.promptVersion,
       utteranceEndAt: suggestions.utteranceEndAt,

@@ -36,6 +36,7 @@ describe('migrations', () => {
       'feedback_signal',
       'speaker',
       'suggestion_failure_reason',
+      'suggestion_skip_reason',
       'suggestion_status',
       'timing',
     ]);

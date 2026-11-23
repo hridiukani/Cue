@@ -8,6 +8,13 @@ export const suggestionStatusEnum = pgEnum('suggestion_status', [
   'streaming',
   'complete',
   'failed',
+  // Deliberately not generated (no model request); see suggestion_skip_reason.
+  'skipped',
+]);
+
+/** Why no suggestion was generated (status = 'skipped'). Mirrors SuggestionSkipReasonSchema. */
+export const suggestionSkipReasonEnum = pgEnum('suggestion_skip_reason', [
+  'prospect_backchannel', // an isolated short prospect line ("yeah", "okay sure"): nothing to answer
 ]);
 
 export const feedbackSignalEnum = pgEnum('feedback_signal', [

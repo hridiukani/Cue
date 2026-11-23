@@ -38,6 +38,12 @@ export const SuggestionFailureReasonSchema = z.enum([
 ]);
 export type SuggestionFailureReason = z.infer<typeof SuggestionFailureReasonSchema>;
 
+/** Why no suggestion was generated at all (stored as status 'skipped'; never sent to the browser). */
+export const SuggestionSkipReasonSchema = z.enum([
+  'prospect_backchannel', // an isolated short prospect line ("yeah", "okay sure"): nothing to answer
+]);
+export type SuggestionSkipReason = z.infer<typeof SuggestionSkipReasonSchema>;
+
 // ---------------------------------------------------------------- client → server
 
 const Hello = z

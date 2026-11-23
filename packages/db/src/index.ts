@@ -60,6 +60,7 @@ export {
   getSuggestion,
   LATENCY_MAX_ROWS,
   listSuggestionTimings,
+  recordSkippedSuggestion,
   setSuggestionFeedback,
   setSuggestionRendered,
   type NewSuggestionInput,

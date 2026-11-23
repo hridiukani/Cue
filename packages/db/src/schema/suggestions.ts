@@ -1,7 +1,11 @@
 import { foreignKey, index, pgTable, text, uuid } from 'drizzle-orm/pg-core';
 import { calls } from './calls';
 import { createdAt, id, timestamptz } from './columns';
-import { suggestionFailureReasonEnum, suggestionStatusEnum } from './enums';
+import {
+  suggestionFailureReasonEnum,
+  suggestionSkipReasonEnum,
+  suggestionStatusEnum,
+} from './enums';
 import { utterances } from './utterances';
 
 /**
@@ -28,6 +32,10 @@ export const suggestions = pgTable(
     status: suggestionStatusEnum('status').notNull().default('streaming'),
     // Set when status = 'failed': cancelled, too slow, rate-limited, provider error…
     failureReason: suggestionFailureReasonEnum('failure_reason'),
+    // Set when status = 'skipped': no request was sent, so only utterance_end_at is set.
+    // (Not a CHECK constraint: Postgres can't use an enum value added in the same
+    // migration transaction. recordSkippedSuggestion is the only writer.)
+    skipReason: suggestionSkipReasonEnum('skip_reason'),
 
     utteranceEndAt: timestamptz('utterance_end_at'),
     requestSentAt: timestamptz('request_sent_at'),
