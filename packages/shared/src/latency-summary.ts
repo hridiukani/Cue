@@ -27,8 +27,10 @@ export const LATENCY_STAGES = [
 export type LatencyStage = (typeof LATENCY_STAGES)[number];
 
 export interface TimingRow {
-  status: 'streaming' | 'complete' | 'failed';
+  status: 'streaming' | 'complete' | 'failed' | 'skipped';
   failureReason: string | null;
+  /** Set for status 'skipped' (e.g. 'prospect_backchannel'). Optional for older callers. */
+  skipReason?: string | null;
   promptVersion: string;
   utteranceEndAt: Date | null;
   requestSentAt: Date | null;
@@ -45,8 +47,10 @@ export interface StageStats {
 }
 
 export interface LatencySummary {
-  /** Every suggestion considered. */
+  /** Suggestions that were requested (skipped rows not included). */
   suggestions: number;
+  /** Prospect lines deliberately given no suggestion, by reason. Never samples. */
+  skipped: Record<string, number>;
   /** Complete and painted, with all five timestamps in order: the samples. */
   samples: number;
   failed: Record<string, number>;
@@ -86,10 +90,19 @@ export function summarizeLatency(rows: readonly TimingRow[]): LatencySummary {
     endToEnd: [],
   };
   const failed: Record<string, number> = {};
+  const skipped: Record<string, number> = {};
+  let requested = 0;
   let samples = 0;
   let incomplete = 0;
   let outOfOrder = 0;
   for (const r of rows) {
+    if (r.status === 'skipped') {
+      // No request was sent: nothing to time. Counted, never a sample.
+      const reason = r.skipReason ?? 'unknown';
+      skipped[reason] = (skipped[reason] ?? 0) + 1;
+      continue;
+    }
+    requested++;
     if (r.status === 'failed') {
       const reason = r.failureReason ?? 'unknown';
       failed[reason] = (failed[reason] ?? 0) + 1;
@@ -128,7 +141,8 @@ export function summarizeLatency(rows: readonly TimingRow[]): LatencySummary {
     values.endToEnd.push(d.rendered_in_client - d.utterance_end);
   }
   return {
-    suggestions: rows.length,
+    suggestions: requested,
+    skipped,
     samples,
     failed,
     incomplete,

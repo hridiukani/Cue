@@ -81,6 +81,26 @@ describe('summarizeLatency', () => {
     expect(s.samples).toBe(1);
   });
 
+  it('leaves skipped rows out of the samples and the request count, and counts them by reason', () => {
+    const skipped: TimingRow = {
+      status: 'skipped',
+      failureReason: null,
+      skipReason: 'prospect_backchannel',
+      promptVersion: 'suggest-v2',
+      utteranceEndAt: at(0),
+      requestSentAt: null,
+      firstTokenAt: null,
+      lastTokenAt: null,
+      clientRenderedAt: null,
+    };
+    const s = summarizeLatency([skipped, skipped, row(10, 300, 50, 20)]);
+    expect(s.skipped).toEqual({ prospect_backchannel: 2 });
+    expect(s.suggestions).toBe(1);
+    expect(s.samples).toBe(1);
+    expect(s.incomplete).toBe(0);
+    expect(s.stages.firstToken?.count).toBe(1);
+  });
+
   it('has no stats without samples', () => {
     const s = summarizeLatency([]);
     expect(s.samples).toBe(0);

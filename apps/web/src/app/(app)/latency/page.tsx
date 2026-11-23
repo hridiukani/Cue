@@ -156,8 +156,10 @@ export default async function LatencyPage() {
 function SampleCounts({ s }: { s: LatencySummary }) {
   const failed = Object.entries(s.failed).sort(([, a], [, b]) => b - a);
   const failedTotal = failed.reduce((n, [, c]) => n + c, 0);
+  const skipped = Object.entries(s.skipped).sort(([, a], [, b]) => b - a);
+  const skippedTotal = skipped.reduce((n, [, c]) => n + c, 0);
   return (
-    <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+    <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
       <Count label="Samples" value={s.samples} hint={`of ${String(s.suggestions)} suggestions`} />
       <Count
         label="Dropped or cancelled"
@@ -165,6 +167,11 @@ function SampleCounts({ s }: { s: LatencySummary }) {
         hint={failed.map(([reason, n]) => `${reason} ×${String(n)}`).join(', ') || 'none'}
       />
       <Count label="Incomplete" value={s.incomplete} hint="streaming, or never painted" />
+      <Count
+        label="Skipped (not requested)"
+        value={skippedTotal}
+        hint={skipped.map(([reason, n]) => `${reason} ×${String(n)}`).join(', ') || 'none'}
+      />
       <Count
         label="Out of order"
         value={s.outOfOrder}
