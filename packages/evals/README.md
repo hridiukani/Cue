@@ -88,12 +88,27 @@ Run it again later if it stopped at a daily limit.
 | First token p50 / p95 | Time from request sent to the first visible token, measured by the harness against the real provider. Runs over production's 1.5 s deadline are counted. Excludes speech-to-text and the browser.                                                       |
 | Cost per 1,000        | For the model under test: real token counts (hidden reasoning included) × the prices in `src/pricing.ts`, with their source and date. A model with no listed price reports "unknown". Cached-input discounts aren't applied, so this is an upper bound. |
 
+### `would_skip_in_production`
+
+**What it shows:** how many cases end on a moment where **production wouldn't ask for a suggestion at all.** The report has it per category and in total, and `compare` shows it for A and B.
+
+**Why it exists:**
+
+- Since 2026-11-22, production skips an isolated short prospect reply (at most 3 words, no "?"), but triggers on the third short reply in a row as a sign the prospect is disengaging.
+- The harness calls the prompt directly, so it grades a line for every case, including moments production would skip.
+- Without this report, a category's pass rate can include lines no rep would ever see. 3 of the 6 "disengaged" cases end on a lone "mm" or "yeah", for example.
+
+**How it's computed:** each case's window (the conversation leading up to the moment) is replayed through production's own `ProspectTrigger`, imported from `@cue/suggest`, not a copy of its constants. The case is flagged when the decision for its final prospect line is "skip". That way the run-of-three rule counts exactly as it does live.
+
+**It's a report only.** Flagged cases are still generated, graded and counted in the pass rate as before, and no window or rubric changes. It's recorded per case in the results file. Files saved before 2026-11-22 show `–` (not recorded).
+
 Every run is saved to `results/<time>_<model>_<prompt-version>.json`. It records:
 
 - the git commit (and whether the tree had uncommitted changes);
 - the prompt version, judge model and judge version;
 - a hash of the case file and of each case's rubric;
-- every generated line with its checks, verdict, latency and token counts.
+- every generated line with its checks, verdict, latency and token counts;
+- per case, whether production would skip its moment (`wouldSkipInProduction`).
 
 `results/` is gitignored, because it holds model output generated from datasets that can't be redistributed. CI uploads its run as an artifact instead.
 

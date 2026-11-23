@@ -48,6 +48,12 @@ export interface CaseRecord {
   playbook: string;
   status: 'DRAFT' | 'REVIEWED';
   runs: RunRecord[];
+  /**
+   * Production would skip this moment: its final prospect line is an isolated
+   * short reply (see production-skip.ts). Report only: the case is graded and
+   * counted as usual. Missing in files saved before 2026-11-22.
+   */
+  wouldSkipInProduction?: boolean;
 }
 
 export interface CaseSummary {
@@ -69,6 +75,8 @@ export interface CaseSummary {
   /** modelErrors + ungraded. */
   errors: number;
   modelErrors: number;
+  /** null when the run file predates the production-skip report. */
+  wouldSkipInProduction: boolean | null;
 }
 
 export interface RunSummary {
@@ -102,9 +110,22 @@ export interface RunSummary {
    * More than one key means mixed judge settings (e.g. after a rejudge).
    */
   gradedBy: Record<string, number>;
+  /**
+   * Cases whose moment production would skip (still graded and in the pass
+   * rate). null when no case in the file records it (saved before 2026-11-22).
+   */
+  wouldSkipInProduction: number | null;
   byCategory: Record<
     string,
-    { runs: number; graded: number; ungraded: number; passes: number; passRate: number | null }
+    {
+      runs: number;
+      graded: number;
+      ungraded: number;
+      passes: number;
+      passRate: number | null;
+      /** Cases in this category production would skip; null if not recorded. */
+      wouldSkipInProduction: number | null;
+    }
   >;
 }
 
@@ -168,7 +189,14 @@ export function summarizeCase(c: CaseRecord): CaseSummary {
     flaky: passes > 0 && passes < graded.length,
     errors: modelErrors + ungraded,
     modelErrors,
+    wouldSkipInProduction: c.wouldSkipInProduction ?? null,
   };
+}
+
+/** Count flagged cases; null if none of them records the flag (an older file). */
+function countWouldSkip(cases: readonly CaseRecord[]): number | null {
+  const known = cases.filter((c) => c.wouldSkipInProduction !== undefined);
+  return known.length === 0 ? null : known.filter((c) => c.wouldSkipInProduction).length;
 }
 
 export function summarizeRun(
@@ -202,6 +230,7 @@ export function summarizeRun(
       ungraded: 0,
       passes: 0,
       passRate: null,
+      wouldSkipInProduction: null,
     });
     const g = c.runs.filter((r) => !isUngraded(r));
     entry.runs += c.runs.length;
@@ -209,7 +238,10 @@ export function summarizeRun(
     entry.ungraded += c.runs.length - g.length;
     entry.passes += g.filter((r) => r.pass).length;
   }
-  for (const e of Object.values(byCategory)) e.passRate = e.graded > 0 ? e.passes / e.graded : null;
+  for (const [cat, e] of Object.entries(byCategory)) {
+    e.passRate = e.graded > 0 ? e.passes / e.graded : null;
+    e.wouldSkipInProduction = countWouldSkip(cases.filter((c) => c.category === cat));
+  }
 
   const passes = graded.filter((r) => r.pass).length;
   const ungraded = all.length - graded.length;
@@ -243,6 +275,7 @@ export function summarizeRun(
         ? judgeCosts.reduce((a, b) => a + b, 0)
         : null,
     gradedBy: countGradedBy(all),
+    wouldSkipInProduction: countWouldSkip(cases),
     byCategory,
   };
 }

@@ -18,6 +18,7 @@ import {
   type RateLimitInfo,
 } from './judge';
 import type { ResolvedCase } from './resolve';
+import { productionWouldSkip } from './production-skip';
 import { scoreRun } from './scoring';
 import type { CaseRecord, RunRecord } from './summary';
 
@@ -383,6 +384,8 @@ export async function runCases(
     playbook: rc.case.playbook,
     status: rc.case.status,
     runs: [],
+    // Report only: does production even ask for a suggestion at this moment?
+    wouldSkipInProduction: productionWouldSkip(rc.window),
   }));
   // Attempt-major order: every case gets its first run before any gets its second.
   const tasks: { index: number; attempt: number }[] = [];

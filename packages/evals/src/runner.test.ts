@@ -500,3 +500,30 @@ describe('runCases with a spent daily quota', () => {
     expect(r?.runs[0]?.judgeSettings).toEqual(LEGACY_JUDGE_SETTINGS);
   });
 });
+
+describe('runCases: would_skip_in_production', () => {
+  it('records, per case, whether production would skip its final prospect line', async () => {
+    const clock = new Clock();
+    const [short] = makeCases(1); // ends on "Too expensive." (2 words, no "?")
+    if (!short) throw new Error('no case');
+    const substantive: ResolvedCase = {
+      ...short,
+      case: { ...short.case, id: 'case-substantive' },
+      window: [
+        { speaker: 'rep', text: 'It is 400 a month.' },
+        { speaker: 'prospect', text: 'That is more than we budgeted for this year.' },
+      ],
+    };
+    const records = await runCases(
+      [short, substantive],
+      { ...OPTS, runsPerCase: 1, concurrency: 1 },
+      deps(new FakeLlm(clock, [{}]), new FakeJudge(), clock),
+    );
+    expect(records.map((r) => [r.id, r.wouldSkipInProduction])).toEqual([
+      ['case-00', true],
+      ['case-substantive', false],
+    ]);
+    // Still generated and graded like any other case.
+    expect(records[0]?.runs[0]?.verdict).not.toBeNull();
+  });
+});

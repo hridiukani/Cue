@@ -130,6 +130,12 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
             )
           : '0',
       ],
+      [
+        'Would skip in prod.',
+        s.wouldSkipInProduction === null
+          ? '– (not recorded in this file)'
+          : `${String(s.wouldSkipInProduction)} of ${String(s.cases)} cases (still graded and in the pass rate)`,
+      ],
     ]),
   );
   lines.push('');
@@ -137,7 +143,7 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
   lines.push(
     table(
       [
-        ['Category', 'Pass rate', 'Graded', 'Ungraded'],
+        ['Category', 'Pass rate', 'Graded', 'Ungraded', 'would_skip_in_production'],
         ...Object.entries(s.byCategory)
           .sort(([x], [y]) => x.localeCompare(y))
           .map(([cat, v]) => [
@@ -145,9 +151,10 @@ export function formatRun(run: RunFile, style: Style = PLAIN): string {
             pctOrNone(v.passRate),
             `${String(v.graded)}/${String(v.runs)}`,
             String(v.ungraded),
+            v.wouldSkipInProduction === null ? '–' : String(v.wouldSkipInProduction),
           ]),
       ],
-      [1, 2, 3],
+      [1, 2, 3, 4],
     ),
   );
   lines.push('');
@@ -287,6 +294,27 @@ export function formatCompare(r: CompareResult, style: Style = PLAIN): string {
       [1, 2, 3],
     ),
   );
+  lines.push('');
+  // Report only: these cases are graded and counted as usual in both runs.
+  const skip = r.wouldSkipInProduction;
+  const count = (n: number | null) => (n === null ? '–' : String(n));
+  lines.push(
+    style.bold('would_skip_in_production') +
+      style.dim(' (cases production would skip; still graded and in the pass rate)'),
+  );
+  lines.push(
+    table(
+      [
+        ['Category', 'A', 'B'],
+        ...skip.byCategory.map((c) => [c.category, count(c.a), count(c.b)]),
+        ['total', count(skip.total.a), count(skip.total.b)],
+      ],
+      [1, 2],
+    ),
+  );
+  if (skip.total.a === null || skip.total.b === null) {
+    lines.push(style.dim('– = not recorded (file saved before 2026-11-22)'));
+  }
   lines.push('');
   const changed = r.cases.filter((c) => c.status !== 'unchanged');
   if (changed.length === 0) {

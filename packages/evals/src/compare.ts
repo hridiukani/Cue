@@ -57,6 +57,14 @@ export interface CompareResult {
     costPer1000Usd: MetricDiff;
   };
   overallRegressed: boolean;
+  /**
+   * Cases per category whose moment production would skip, in A and B (null
+   * when that file predates the report). Report only: not part of any verdict.
+   */
+  wouldSkipInProduction: {
+    total: { a: number | null; b: number | null };
+    byCategory: { category: string; a: number | null; b: number | null }[];
+  };
   cases: CaseDiff[];
   regressions: number;
   improvements: number;
@@ -183,6 +191,16 @@ export function compareRuns(
       costPer1000Usd: diff(sa.costPer1000Usd, sb.costPer1000Usd),
     },
     overallRegressed: passRate.delta !== null && passRate.delta <= -OVERALL_PASS_DROP + 1e-9,
+    wouldSkipInProduction: {
+      total: { a: sa.wouldSkipInProduction, b: sb.wouldSkipInProduction },
+      byCategory: [...new Set([...Object.keys(sa.byCategory), ...Object.keys(sb.byCategory)])]
+        .sort()
+        .map((category) => ({
+          category,
+          a: sa.byCategory[category]?.wouldSkipInProduction ?? null,
+          b: sb.byCategory[category]?.wouldSkipInProduction ?? null,
+        })),
+    },
     cases,
     regressions: cases.filter((c) => c.status === 'regressed').length,
     improvements: cases.filter((c) => c.status === 'improved').length,

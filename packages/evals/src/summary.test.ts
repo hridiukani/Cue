@@ -137,8 +137,22 @@ describe('summarizeRun', () => {
     });
     expect(s.meanCaseScoreStdDev).toBeCloseTo((0 + 1) / 2);
     expect(s.byCategory).toEqual({
-      price_objection: { runs: 2, graded: 2, ungraded: 0, passes: 2, passRate: 1 },
-      buying_signal: { runs: 2, graded: 2, ungraded: 0, passes: 1, passRate: 0.5 },
+      price_objection: {
+        runs: 2,
+        graded: 2,
+        ungraded: 0,
+        passes: 2,
+        passRate: 1,
+        wouldSkipInProduction: null, // these fixtures predate the report
+      },
+      buying_signal: {
+        runs: 2,
+        graded: 2,
+        ungraded: 0,
+        passes: 1,
+        passRate: 0.5,
+        wouldSkipInProduction: null,
+      },
     });
   });
 
@@ -202,6 +216,7 @@ describe('summarizeRun', () => {
       ungraded: 2,
       passes: 1,
       passRate: 1,
+      wouldSkipInProduction: null,
     });
     expect(tooManyUngraded(s)).toBe(true);
   });
@@ -267,5 +282,34 @@ describe('pricing', () => {
       }),
     ).toBe(0.15);
     expect(costUsd('openai/gpt-oss-20b', null)).toBeNull();
+  });
+});
+
+describe('would_skip_in_production', () => {
+  const pass = () => run({ pass: true, score: 5 });
+  const fail = () => run({ pass: false, score: 2 });
+
+  it('counts flagged cases per category, and keeps them in the pass rate', () => {
+    const flagged = [
+      { ...kase('d1', [pass(), fail()], 'disengaged'), wouldSkipInProduction: true },
+      { ...kase('d2', [pass(), pass()], 'disengaged'), wouldSkipInProduction: false },
+      { ...kase('p1', [fail(), fail()], 'price_objection'), wouldSkipInProduction: false },
+    ];
+    const s = summarizeRun(flagged, MODELS);
+    expect(s.wouldSkipInProduction).toBe(1);
+    expect(s.byCategory.disengaged?.wouldSkipInProduction).toBe(1);
+    expect(s.byCategory.price_objection?.wouldSkipInProduction).toBe(0);
+    // Same pass rate as without the flag: report only.
+    const unflagged = flagged.map(({ wouldSkipInProduction: _, ...c }) => c);
+    expect(s.passRate).toBe(summarizeRun(unflagged, MODELS).passRate);
+    expect(s.byCategory.disengaged?.passRate).toBe(0.75); // 3 of 4, the flagged case included
+    expect(s.byCategory.disengaged?.graded).toBe(4);
+  });
+
+  it('is null, not 0, for a file saved before the report existed', () => {
+    const s = summarizeRun([kase('old', [pass()], 'disengaged')], MODELS);
+    expect(s.wouldSkipInProduction).toBeNull();
+    expect(s.byCategory.disengaged?.wouldSkipInProduction).toBeNull();
+    expect(summarizeCase(kase('old', [pass()])).wouldSkipInProduction).toBeNull();
   });
 });

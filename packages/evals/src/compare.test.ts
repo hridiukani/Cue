@@ -136,3 +136,28 @@ describe('formatCompare', () => {
     expect(text.includes('\u001b[')).toBe(false); // no colour codes unless asked
   });
 });
+
+describe('compare: would_skip_in_production', () => {
+  it('lists the count per category for A and B, with – for a file that predates it', () => {
+    const older = fakeRunFile([fakeCase('d1', 2, 3, { category: 'disengaged' })]);
+    const newer = fakeRunFile([
+      { ...fakeCase('d1', 2, 3, { category: 'disengaged' }), wouldSkipInProduction: true },
+      { ...fakeCase('p1', 3, 3, { category: 'price_objection' }), wouldSkipInProduction: false },
+    ]);
+    const r = compareRuns({ file: 'a.json', run: older }, { file: 'b.json', run: newer });
+    expect(r.wouldSkipInProduction).toEqual({
+      total: { a: null, b: 1 },
+      byCategory: [
+        { category: 'disengaged', a: null, b: 1 },
+        { category: 'price_objection', a: null, b: 0 },
+      ],
+    });
+    const text = formatCompare(r);
+    expect(text).toContain('would_skip_in_production');
+    expect(text).toMatch(/disengaged\s+–\s+1/);
+    expect(text).toMatch(/total\s+–\s+1/);
+    expect(text).toContain('not recorded');
+    // Report only: the flagged case is compared like any other.
+    expect(r.cases.find((c) => c.id === 'd1')?.status).toBe('unchanged');
+  });
+});
