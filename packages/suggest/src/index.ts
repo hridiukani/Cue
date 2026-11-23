@@ -4,3 +4,4 @@
 export * from './llm';
 export * from './model-settings';
 export * from './prompt';
+export * from './prospect-trigger';

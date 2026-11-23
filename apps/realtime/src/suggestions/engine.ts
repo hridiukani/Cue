@@ -8,11 +8,14 @@ import type {
 import {
   buildSuggestionMessages,
   cleanSuggestion,
+  DEFAULT_PROSPECT_TRIGGER,
   LlmError,
   type LlmClient,
   MAX_SUGGESTION_WORDS,
   modelRequestSettings,
   type PlaybookForPrompt,
+  ProspectTrigger,
+  type ProspectTriggerThresholds,
   SUGGESTION_SAMPLING,
   type WindowUtterance,
   wordCount,
@@ -23,11 +26,6 @@ import {
   type RepSpeech,
   repSpeechCancelsSuggestion,
 } from './backchannel';
-import {
-  DEFAULT_PROSPECT_TRIGGER,
-  ProspectTrigger,
-  type ProspectTriggerThresholds,
-} from './prospect-trigger';
 
 /** Persistence for this session's suggestions, already scoped to its owner. */
 export interface SuggestionStore {
@@ -98,7 +96,7 @@ interface Flight {
  * - Triggered by a saved prospect final, at 1x or 2x only (never at instant).
  *   An isolated short prospect reply (<= 3 words, no "?") is skipped and
  *   recorded as 'skipped'; three in a row trigger (disengagement). See
- *   ./prospect-trigger.ts. A skipped line doesn't cancel the one in flight.
+ *   @cue/suggest prospect-trigger.ts. A skipped line doesn't cancel the one in flight.
  * - A newer prospect final, substantial rep speech (> 4 words or > 1.5 s; short
  *   backchannels don't count), or the session stopping cancels the suggestion
  *   in flight.

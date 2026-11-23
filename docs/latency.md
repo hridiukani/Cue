@@ -114,7 +114,7 @@ Since 2026-11-22, an **isolated short prospect reply** gets no suggestion. "Shor
   - It resets after a substantive line, and after it triggers.
 - **Substantive lines trigger as before:** more than 3 words, or any line with a "?".
 - **A skipped reply doesn't cancel the suggestion in flight.** A prospect "mm-hmm" while the previous answer streams is the prospect-side twin of the rep backchannel rule. Every other cancel still applies.
-- **Where to change it:** `PROSPECT_SKIP_MAX_WORDS` (3) and `DISENGAGED_RUN_LENGTH` (3) in `apps/realtime/src/suggestions/prospect-trigger.ts`. The engine also accepts custom limits through its `prospectTrigger` option.
+- **Where to change it:** `PROSPECT_SKIP_MAX_WORDS` (3) and `DISENGAGED_RUN_LENGTH` (3) in `packages/suggest/src/prospect-trigger.ts` (shared with the eval harness). The engine also accepts custom limits through its `prospectTrigger` option.
 - **The run lives in memory.** After a reconnect or server restart it starts again from 0.
 
 **Skips are recorded, not silent.** A skipped line gets a `suggestions` row with `status = 'skipped'` and `skip_reason = 'prospect_backchannel'`. Only `utterance_end_at` is set, because no request was sent. Nothing is sent to the browser.

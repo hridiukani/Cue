@@ -1,9 +1,13 @@
-import { countWords } from './backchannel';
+import { wordCount } from './prompt';
 
 /**
  * Which prospect lines are worth a suggestion?
  *
- * The prospect-side twin of the rep backchannel rule (./backchannel.ts):
+ * Lives in @cue/suggest so production (apps/realtime's SuggestionEngine) and
+ * the eval harness (its production-skip report) use the very same rule.
+ *
+ * The prospect-side twin of the rep backchannel rule
+ * (apps/realtime/src/suggestions/backchannel.ts):
  *
  * - **Substantive line** (more than PROSPECT_SKIP_MAX_WORDS words, or any line
  *   with a "?"): trigger, as always.
@@ -44,7 +48,7 @@ export function isShortProspectReply(
   text: string,
   maxWords: number = PROSPECT_SKIP_MAX_WORDS,
 ): boolean {
-  return countWords(text) <= maxWords && !text.includes('?');
+  return wordCount(text) <= maxWords && !text.includes('?');
 }
 
 /** One per session: remembers how many short prospect replies came in a row. */
