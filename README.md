@@ -62,17 +62,29 @@ The goal is the **first words of a suggestion on screen in under a second** afte
 
 Measured numbers come from the app's `/latency` page: p50/p95 over my own replays, seeded demo rows excluded, with the sample count shown.
 
-| Stage                         | From → to                                             | p50                  | p95                  |
-| ----------------------------- | ----------------------------------------------------- | -------------------- | -------------------- |
-| STT endpointing               | prospect stops speaking → transcriber emits the final | ‹not built yet›      | ‹not built yet›      |
-| Cue pipeline                  | `utterance_end` → `suggestion_request_sent`           | ‹fill from /latency› | ‹fill from /latency› |
-| Network + time to first token | `suggestion_request_sent` → `first_token`             | ‹fill from /latency› | ‹fill from /latency› |
-| Rest of the line              | `first_token` → `last_token`                          | ‹fill from /latency› | ‹fill from /latency› |
-| Delivery + render             | `last_token` → `rendered_in_client`                   | ‹fill from /latency› | ‹fill from /latency› |
-| **Line ended → first token**  | `utterance_end` → `first_token`                       | ‹fill from /latency› | ‹fill from /latency› |
-| **End to end**                | `utterance_end` → `rendered_in_client`                | ‹fill from /latency› | ‹fill from /latency› |
+| Stage                         | From → to                                             | p50             | p95             |
+| ----------------------------- | ----------------------------------------------------- | --------------- | --------------- |
+| STT endpointing               | prospect stops speaking → transcriber emits the final | ‹not built yet› | ‹not built yet› |
+| Cue pipeline                  | `utterance_end` → `suggestion_request_sent`           | 6 ms            | 13 ms           |
+| Network + time to first token | `suggestion_request_sent` → `first_token`             | 320 ms          | 599 ms          |
+| Rest of the line              | `first_token` → `last_token`                          | 22 ms           | 30 ms           |
+| Delivery + render             | `last_token` → `rendered_in_client`                   | 28 ms           | 37 ms           |
+| **Line ended → first token**  | `utterance_end` → `first_token`                       | **325 ms**      | **671 ms**      |
+| **End to end**                | `utterance_end` → `rendered_in_client`                | **379 ms**      | **909 ms**      |
 
-Samples: ‹n› suggestions (‹n› dropped or cancelled), measured ‹date› on ‹local / deployed›.
+**Samples:** 185 suggestions with all five timestamps, out of 190 requested.
+
+- 0 were dropped or cancelled.
+- 5 were incomplete (still streaming, or never reported as painted).
+- 6 short prospect replies were skipped by design.
+
+**Setup:** measured on the **deployed** app (Vercel + Render + Supabase, free tiers), from my replays of gwenshap and saas calls at 1×. Model `openai/gpt-oss-20b` on Groq, prompt `suggest-v2/no-playbook`. Taken from `/latency` on 2026-11-24.
+
+**What the numbers say:**
+
+- **Both totals are inside budget.** p95 to the first token is 671 ms, well under the 1 s goal, and p95 end to end is 909 ms.
+- **The model dominates.** Time to first token is about 85% of the end-to-end p50.
+- **There are slow outliers.** The worst delivery + render was 10.3 s, which pulls the end-to-end max to 10.7 s while p95 stays at 37 ms. That pattern matches a background tab: browsers throttle the frame callbacks that report "painted". The worst first token was 1,148 ms, under the 1.5 s drop deadline.
 
 **How to read it:**
 

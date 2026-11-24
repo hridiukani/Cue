@@ -176,3 +176,28 @@ On 2026-11-20 production moved from prompt `suggest-v1` to `suggest-v2`. v2 tell
 ## Measured numbers
 
 Only record numbers measured against a **real** provider, with the date, model and sample size. Numbers from the mock model used in tests and local smoke checks (fixed delays) are not latency results.
+
+### Deployed replays, 2026-11-24
+
+**Setup:** Vercel + Render + Supabase (free tiers), real Groq `openai/gpt-oss-20b`, prompt `suggest-v2/no-playbook`, gwenshap and saas replays at 1×. From `/latency`.
+
+**Samples:** 185 suggestions with all five timestamps, out of 190 requested. 0 were dropped, 5 were incomplete, and 6 short prospect replies were skipped (not counted).
+
+| Stage (ms)                                             | p50 | p95 | max    |
+| ------------------------------------------------------ | --- | --- | ------ |
+| Cue pipeline (`utterance_end` → `request_sent`)        | 6   | 13  | 422    |
+| Time to first token (`request_sent` → `first_token`)   | 320 | 599 | 1,148  |
+| Rest of the line (`first_token` → `last_token`)        | 22  | 30  | 200    |
+| Delivery + paint (`last_token` → `rendered_in_client`) | 28  | 37  | 10,327 |
+| Line ended → first token                               | 325 | 671 | 1,153  |
+| End to end (`utterance_end` → `rendered_in_client`)    | 379 | 909 | 10,679 |
+
+**What this includes and excludes:**
+
+- **No speech-to-text.** In replay, `utterance_end` is when the transcript line was emitted.
+- **Network is real.** Render → Groq time is inside time to first token; Render → browser time is inside delivery + paint.
+
+**The outliers:**
+
+- **Paint max, 10.3 s:** this looks like a background tab, where the browser throttles the frame callbacks that report "painted". p95 is unaffected.
+- **First token max, 1,148 ms:** under the 1.5 s drop deadline, so nothing was dropped.
