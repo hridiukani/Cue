@@ -6,15 +6,9 @@
 
 ## Screenshots
 
-_Placeholders, to be filled in:_
-
-- [ ] `docs/media/landing.png`: the public landing page at `/`
 - [ ] `docs/media/library.png`: the call library, with dataset, duration and audio filters
-- [ ] `docs/media/replay.gif`: a replay at 1×, transcript streaming in, a suggestion appearing just after the prospect stops
 - [ ] `docs/media/latency.png`: the `/latency` page (p50/p95 for each stage)
 - [ ] `docs/media/eval.png`: a `pnpm eval` report in the terminal
-- [ ] `docs/media/reconnect.gif`: restarting the realtime server mid-replay, the browser reconnects and resumes
-- [ ] `docs/media/waking.png`: the "Waking the realtime server" banner on a free-tier cold start
 
 ## Architecture
 
