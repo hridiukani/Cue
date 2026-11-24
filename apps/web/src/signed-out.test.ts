@@ -35,7 +35,6 @@ async function authorized(pathname: string, signedIn: boolean): Promise<true | R
 
 describe('the auth proxy, signed out', () => {
   it.each([
-    '/',
     '/calls',
     '/calls/00000000-0000-4000-8000-000000000000',
     '/playbooks',
@@ -48,7 +47,8 @@ describe('the auth proxy, signed out', () => {
     expect(new URL(location).pathname).toBe('/signin');
   });
 
-  it('lets the sign-in page through', async () => {
+  it('lets the landing page and the sign-in page through', async () => {
+    expect(await authorized('/', false)).toBe(true);
     expect(await authorized('/signin', false)).toBe(true);
   });
 

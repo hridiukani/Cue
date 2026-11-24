@@ -2,12 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_SIGNED_IN_PATH, isPublicPath, safeRedirectPath } from './paths';
 
 describe('isPublicPath', () => {
-  it('only treats the sign-in and invite-only pages as public', () => {
+  it('only treats the landing, sign-in and invite-only pages as public', () => {
+    expect(isPublicPath('/')).toBe(true);
     expect(isPublicPath('/signin')).toBe(true);
     expect(isPublicPath('/invite-only')).toBe(true);
     expect(isPublicPath('/playbooks')).toBe(false);
-    expect(isPublicPath('/')).toBe(false);
     expect(isPublicPath('/signinx')).toBe(false);
+  });
+
+  it('makes "/" public as an exact path only, never as a prefix', () => {
+    for (const p of ['/calls', '/latency', '/playbooks/new', '/api/recordings/x/audio', '//x']) {
+      expect(isPublicPath(p)).toBe(false);
+    }
+  });
+
+  it('lands a sign-in on the call library by default', () => {
+    expect(DEFAULT_SIGNED_IN_PATH).toBe('/calls');
+    expect(safeRedirectPath('/')).toBe('/calls'); // the landing page isn't a destination
   });
 });
 
