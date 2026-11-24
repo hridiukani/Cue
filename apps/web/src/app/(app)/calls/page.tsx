@@ -3,22 +3,23 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Badge, TimingBadge } from '@/components/badges';
 import { buttonClass } from '@/components/button-styles';
+import { FilterSelect } from '@/components/filter-select';
+import { Eyebrow, PageHeader } from '@/components/ui';
 import {
   DURATION_BUCKETS,
   filtersToQuery,
   formatDuration,
   PAGE_SIZE,
   parseCallFilters,
+  rowNumber,
   SOURCE_TYPES,
+  splitTitle,
   toRecordingQuery,
 } from '@/lib/call-filters';
 import { getDb } from '@/server/db';
 import { requireUser } from '@/server/session';
 
-export const metadata: Metadata = { title: 'Call library · Cue' };
-
-const selectClass =
-  'block w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-200';
+export const metadata: Metadata = { title: 'Calls · Cue' };
 
 export default async function CallsPage({
   searchParams,
@@ -36,122 +37,130 @@ export default async function CallsPage({
   const filtered = Boolean(filters.dataset ?? filters.duration ?? filters.source);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Call library</h1>
-        <p className="mt-1 text-sm text-neutral-600">
-          Recorded and simulated sales calls you can replay through Cue as if they were live.
-        </p>
-      </div>
+    <div>
+      <PageHeader
+        title="Calls"
+        subtitle="Recorded and simulated sales calls you can replay through Cue as if they were live."
+      />
 
       {datasets.length === 0 ? (
         <NoDataYet />
       ) : (
         <>
-          {/* A plain GET form: filters live in the URL and work without JavaScript. */}
+          {/* A plain GET form: filters live in the URL; each select submits it on change. */}
           <form
             method="get"
-            className="grid gap-3 rounded-xl border border-neutral-200 bg-white p-4 sm:grid-cols-4 sm:items-end"
+            className="mt-10 flex flex-wrap items-baseline gap-x-10 gap-y-4 border-b border-rule pb-6 text-[15px]"
           >
-            <label className="space-y-1.5 text-sm font-medium">
-              <span>Dataset</span>
-              <select name="dataset" defaultValue={filters.dataset ?? ''} className={selectClass}>
-                <option value="">All datasets</option>
-                {datasets.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1.5 text-sm font-medium">
-              <span>Duration</span>
-              <select name="duration" defaultValue={filters.duration ?? ''} className={selectClass}>
-                <option value="">Any length</option>
-                {Object.entries(DURATION_BUCKETS).map(([key, b]) => (
-                  <option key={key} value={key}>
-                    {b.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="space-y-1.5 text-sm font-medium">
-              <span>Source type</span>
-              <select name="source" defaultValue={filters.source ?? ''} className={selectClass}>
-                <option value="">Any source</option>
-                {Object.entries(SOURCE_TYPES).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="flex gap-2">
-              <button type="submit" className={`${buttonClass('primary')} flex-1`}>
+            <FilterSelect
+              label="Dataset"
+              name="dataset"
+              defaultValue={filters.dataset ?? ''}
+              allLabel="All datasets"
+              options={datasets.map((d) => ({ value: d.id, label: d.name }))}
+            />
+            <FilterSelect
+              label="Duration"
+              name="duration"
+              defaultValue={filters.duration ?? ''}
+              allLabel="Any length"
+              options={Object.entries(DURATION_BUCKETS).map(([value, b]) => ({
+                value,
+                label: b.label,
+              }))}
+            />
+            <FilterSelect
+              label="Source"
+              name="source"
+              defaultValue={filters.source ?? ''}
+              allLabel="Any source"
+              options={Object.entries(SOURCE_TYPES).map(([value, label]) => ({ value, label }))}
+            />
+            <noscript>
+              <button type="submit" className={buttonClass('link')}>
                 Apply
               </button>
+            </noscript>
+            <span className="ml-auto flex items-baseline gap-6">
               {filtered && (
-                <Link href="/calls" className={buttonClass('ghost')}>
-                  Clear
+                <Link href="/calls" className="text-sm text-muted-foreground hover:text-signal">
+                  Clear filters
                 </Link>
               )}
-            </div>
+              <span className="font-mono text-sm text-muted-foreground tabular">
+                {total} {total === 1 ? 'call' : 'calls'}
+              </span>
+            </span>
           </form>
 
           {items.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-neutral-300 bg-white px-6 py-12 text-center">
-              <h2 className="text-base font-semibold">No calls match these filters</h2>
-              <Link href="/calls" className={`${buttonClass('secondary')} mt-4`}>
+            <div className="py-16">
+              <Eyebrow>No matches</Eyebrow>
+              <p className="mt-4 text-xl">No calls match these filters.</p>
+              <Link href="/calls" className={`${buttonClass('secondary')} mt-6`}>
                 Clear filters
               </Link>
             </div>
           ) : (
             <>
-              <p className="text-sm text-neutral-500">
-                {total} {total === 1 ? 'call' : 'calls'}
-              </p>
-              <ul className="divide-y divide-neutral-200 overflow-hidden rounded-xl border border-neutral-200 bg-white">
-                {items.map((r) => (
-                  <li key={r.id}>
-                    <Link
-                      href={`/calls/${r.id}`}
-                      className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-neutral-50 focus-visible:bg-neutral-50 focus-visible:outline-none"
-                    >
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{r.title}</p>
-                        <p className="mt-0.5 truncate text-sm text-neutral-600">{r.datasetName}</p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2 text-xs">
-                        {r.hasAudio && <Badge tone="ink">Audio</Badge>}
-                        <TimingBadge timing={r.timing} />
-                        <span className="w-14 text-right tabular-nums text-neutral-500">
+              <ol>
+                {items.map((r, i) => {
+                  const { lead, rest } = splitTitle(r.title);
+                  return (
+                    <li key={r.id} className="border-b border-border">
+                      <Link
+                        href={`/calls/${r.id}`}
+                        className="group flex items-baseline gap-8 py-6 focus-visible:outline-none"
+                      >
+                        <span className="w-12 shrink-0 font-mono text-sm text-muted-foreground tabular">
+                          {rowNumber(filters.page, i)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-lg">
+                            <span className="font-medium group-hover:text-signal group-focus-visible:text-signal">
+                              {lead}
+                            </span>
+                            {rest && <span className="text-muted-foreground"> — {rest}</span>}
+                          </span>
+                          <span className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
+                            <span className="truncate">{r.datasetName}</span>
+                            {r.hasAudio && <Badge tone="ink">Audio</Badge>}
+                          </span>
+                        </span>
+                        <span className="hidden shrink-0 sm:inline">
+                          <TimingBadge timing={r.timing} />
+                        </span>
+                        <span className="w-16 shrink-0 text-right font-mono text-lg tabular group-hover:text-signal">
                           {formatDuration(r.durationMs)}
                         </span>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ol>
 
               {pages > 1 && (
-                <nav className="flex items-center justify-between text-sm" aria-label="Pagination">
+                <nav
+                  className="mt-10 flex items-center justify-between text-[15px]"
+                  aria-label="Pagination"
+                >
                   {filters.page > 1 ? (
                     <Link
                       href={`/calls${filtersToQuery(filters, { page: filters.page - 1 })}`}
-                      className={buttonClass('secondary')}
+                      className="hover:text-signal"
                     >
                       ← Previous
                     </Link>
                   ) : (
                     <span />
                   )}
-                  <span className="text-neutral-500">
+                  <span className="font-mono text-sm text-muted-foreground tabular">
                     Page {filters.page} of {pages}
                   </span>
                   {filters.page < pages ? (
                     <Link
                       href={`/calls${filtersToQuery(filters, { page: filters.page + 1 })}`}
-                      className={buttonClass('secondary')}
+                      className="hover:text-signal"
                     >
                       Next →
                     </Link>
@@ -170,24 +179,18 @@ export default async function CallsPage({
 
 function NoDataYet() {
   return (
-    <div className="rounded-xl border border-dashed border-neutral-300 bg-white px-6 py-14 text-center">
-      <div
-        aria-hidden="true"
-        className="mx-auto flex size-12 items-center justify-center rounded-full bg-neutral-100 text-xl"
-      >
-        🎧
-      </div>
-      <h2 className="mt-4 text-base font-semibold">No calls imported yet</h2>
-      <p className="mx-auto mt-1 max-w-md text-sm text-neutral-600">
-        Import recordings from the public datasets, then refresh this page. In a terminal at the
-        repo root:
+    <section className="mt-16 max-w-2xl">
+      <Eyebrow>No calls imported yet</Eyebrow>
+      <p className="mt-5 text-2xl leading-relaxed">
+        Import recordings from the public datasets, then refresh this page.
       </p>
-      <pre className="mx-auto mt-4 max-w-md overflow-x-auto rounded-lg bg-neutral-900 px-4 py-3 text-left text-xs text-neutral-100">
-        <code>pnpm ingest -- --dataset gwenshap{'\n'}pnpm ingest -- --dataset real-sales</code>
+      <p className="mt-6 text-muted-foreground">In a terminal at the repo root:</p>
+      <pre className="mt-3 overflow-x-auto rounded-sm bg-primary px-5 py-4 font-mono text-sm text-primary-foreground">
+        <code>pnpm ingest -- --dataset licensed</code>
       </pre>
-      <p className="mt-3 text-xs text-neutral-500">
+      <p className="mt-4 text-sm text-muted-foreground">
         See docs/datasets.md for all datasets and options.
       </p>
-    </div>
+    </section>
   );
 }

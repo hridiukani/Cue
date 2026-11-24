@@ -4,6 +4,8 @@ import {
   formatDuration,
   PAGE_SIZE,
   parseCallFilters,
+  rowNumber,
+  splitTitle,
   toRecordingQuery,
 } from './call-filters';
 
@@ -61,5 +63,29 @@ describe('formatDuration', () => {
     expect(formatDuration(754_000)).toBe('12:34');
     expect(formatDuration(3_725_000)).toBe('1:02:05');
     expect(formatDuration(0)).toBe('0:00');
+  });
+});
+
+describe('splitTitle', () => {
+  it('splits at the first " — "', () => {
+    expect(splitTitle('TestMaster Suite — AutoTest Pro')).toEqual({
+      lead: 'TestMaster Suite',
+      rest: 'AutoTest Pro',
+    });
+    expect(splitTitle('A — B — C')).toEqual({ lead: 'A', rest: 'B — C' });
+  });
+
+  it('keeps a title without a separator whole', () => {
+    expect(splitTitle('Sales call 7')).toEqual({ lead: 'Sales call 7', rest: null });
+    expect(splitTitle(' — only rest')).toEqual({ lead: ' — only rest', rest: null });
+    expect(splitTitle('Lead — ')).toEqual({ lead: 'Lead', rest: null });
+  });
+});
+
+describe('rowNumber', () => {
+  it('numbers rows across pages, zero-padded to three digits', () => {
+    expect(rowNumber(1, 0)).toBe('001');
+    expect(rowNumber(2, 4, 20)).toBe('025');
+    expect(rowNumber(51, 9, 20)).toBe('1010');
   });
 });

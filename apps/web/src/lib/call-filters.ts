@@ -83,3 +83,19 @@ export function formatDuration(ms: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return h > 0 ? `${String(h)}:${pad(m)}:${pad(s)}` : `${String(m)}:${pad(s)}`;
 }
+
+/**
+ * "TestMaster Suite — AutoTest Pro" → lead "TestMaster Suite", rest "AutoTest Pro",
+ * so the library can set the first part in bold. No " — " → the whole title is the lead.
+ */
+export function splitTitle(title: string): { lead: string; rest: string | null } {
+  const i = title.indexOf(' — ');
+  if (i <= 0) return { lead: title, rest: null };
+  const rest = title.slice(i + 3).trim();
+  return { lead: title.slice(0, i).trim(), rest: rest || null };
+}
+
+/** "001": a row's position across pages, for the library's mono index. */
+export function rowNumber(page: number, index: number, pageSize: number = PAGE_SIZE): string {
+  return String((page - 1) * pageSize + index + 1).padStart(3, '0');
+}
