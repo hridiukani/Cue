@@ -1,10 +1,10 @@
 import { getRecording, getRecordingAudio, listPlaybooks } from '@cue/db';
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Badge, TimingBadge } from '@/components/badges';
+import { BackLink, Notice } from '@/components/ui';
 import { publicConfig } from '@/config';
-import { formatDuration } from '@/lib/call-filters';
+import { formatDuration, splitTitle } from '@/lib/call-filters';
 import { audioPlaybackEnabled } from '@/server/blobs';
 import { getDb } from '@/server/db';
 import { requireUser } from '@/server/session';
@@ -24,16 +24,18 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
     playAudio ? getRecordingAudio(getDb(), id) : null,
   ]);
   if (!recording) notFound();
+  const { lead, rest } = splitTitle(recording.title);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="space-y-8">
       <div>
-        <Link href="/calls" className="text-sm text-neutral-500 hover:text-neutral-900">
-          ← Call library
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">{recording.title}</h1>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-neutral-600">{recording.dataset.name}</span>
+        <BackLink href="/calls">Calls</BackLink>
+        <h1 className="mt-6 font-serif text-4xl leading-tight tracking-tight sm:text-5xl">
+          {lead}
+          {rest && <span className="text-muted-foreground"> — {rest}</span>}
+        </h1>
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <span className="text-muted-foreground">{recording.dataset.name}</span>
           <TimingBadge timing={recording.timing} />
           {audio ? (
             <Badge tone="ink">Audio</Badge>
@@ -52,15 +54,17 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
               </Badge>
             ))
           )}
-          <span className="tabular-nums text-neutral-500">
+          <span className="font-mono tabular text-foreground">
             {formatDuration(recording.durationMs)}
           </span>
         </div>
         {recording.dataset.license === 'unspecified' && (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            This dataset has no stated license. Use it internally only; don&apos;t share or publish
-            its transcripts.
-          </p>
+          <div className="mt-5">
+            <Notice tone="status">
+              This dataset has no stated license. Use it internally only; don&apos;t share or
+              publish its transcripts.
+            </Notice>
+          </div>
         )}
       </div>
 

@@ -71,8 +71,8 @@ export function ReplayPlayer({
         />
       )}
 
-      <div className="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="space-y-4 border-y border-rule py-5">
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
           {!started || finished ? (
             <button
               type="button"
@@ -103,7 +103,7 @@ export function ReplayPlayer({
           )}
 
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-neutral-600">Playbook</span>
+            <span className="text-muted-foreground">Playbook</span>
             <select
               value={playbookId}
               // Fixed for the session: pick before starting (or start a new replay).
@@ -111,7 +111,7 @@ export function ReplayPlayer({
               onChange={(e) => {
                 setPlaybookId(e.target.value);
               }}
-              className="max-w-44 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+              className="max-w-44 border-0 border-b border-border bg-transparent py-1 text-[15px] focus:border-ring focus:outline-none"
             >
               <option value="">None (generic)</option>
               {playbooks.map((p) => (
@@ -123,7 +123,7 @@ export function ReplayPlayer({
           </label>
 
           <label className="flex items-center gap-2 text-sm">
-            <span className="text-neutral-600">Speed</span>
+            <span className="text-muted-foreground">Speed</span>
             <select
               value={started ? state.speed : chosenSpeed}
               disabled={started && !canControl}
@@ -132,7 +132,7 @@ export function ReplayPlayer({
                 setChosenSpeed(speed);
                 if (started) r.setSpeed(speed);
               }}
-              className="rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm"
+              className="border-0 border-b border-border bg-transparent py-1 text-[15px] focus:border-ring focus:outline-none"
             >
               {SPEEDS.map((s) => (
                 <option key={s.value} value={s.value}>
@@ -142,7 +142,7 @@ export function ReplayPlayer({
             </select>
           </label>
 
-          <span className="ml-auto text-sm tabular-nums text-neutral-600">
+          <span className="ml-auto font-mono text-lg tabular text-foreground">
             {formatDuration(shownPosition)} / {formatDuration(state.durationMs)}
           </span>
         </div>
@@ -160,9 +160,9 @@ export function ReplayPlayer({
           }}
           onPointerUp={commitSeek}
           onKeyUp={commitSeek}
-          className="w-full accent-neutral-900 disabled:opacity-50"
+          className="w-full accent-signal disabled:opacity-50"
         />
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-muted-foreground">
           Seeking back starts a new replay session; the earlier one keeps everything it saved.
         </p>
         {audioSrc && (
@@ -178,7 +178,7 @@ export function ReplayPlayer({
       </div>
 
       {/* Live two-sided transcript on the left, the streaming suggestion on the right. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
         <Transcript state={state} />
         <SuggestionPanel
           availability={state.suggestions}
@@ -205,7 +205,7 @@ function Transcript({ state }: { state: ReplayState }) {
 
   if (lines === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-neutral-300 bg-white px-6 py-10 text-center text-sm text-neutral-500">
+      <div className="border-t border-border py-10 text-muted-foreground">
         {state.playback === 'idle'
           ? 'Press Start replay. The transcript appears here as each person speaks.'
           : 'Waiting for the first words…'}
@@ -214,10 +214,7 @@ function Transcript({ state }: { state: ReplayState }) {
   }
 
   return (
-    <div
-      className="max-h-[60vh] space-y-3 overflow-y-auto rounded-xl border border-neutral-200 bg-white p-4"
-      aria-live="polite"
-    >
+    <div className="max-h-[60vh] overflow-y-auto border-t border-border" aria-live="polite">
       {state.finals.map((f) => (
         <Line key={f.utteranceId} speaker={f.speaker} text={f.text} atMs={f.startMs} />
       ))}
@@ -241,20 +238,17 @@ function Line({
   interim?: boolean;
 }) {
   return (
-    <div className={`flex gap-3 ${speaker === 'rep' ? '' : 'flex-row-reverse text-right'}`}>
-      <div
-        className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
-          speaker === 'rep' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-900'
-        } ${interim ? 'italic opacity-60' : ''}`}
-      >
-        <p
-          className={`mb-0.5 text-xs ${speaker === 'rep' ? 'text-neutral-300' : 'text-neutral-500'}`}
-        >
-          {SPEAKER_LABEL[speaker]} · {formatDuration(atMs)}
-          {interim && ' · speaking…'}
-        </p>
-        <p>{text}</p>
-      </div>
+    <div className="flex gap-6 border-b border-border py-4">
+      <p className="w-24 shrink-0 font-mono text-xs uppercase leading-6 tracking-wider">
+        <span className={speaker === 'prospect' ? 'text-signal' : 'text-foreground'}>
+          {SPEAKER_LABEL[speaker]}
+        </span>
+        <span className="block text-muted-foreground tabular">{formatDuration(atMs)}</span>
+      </p>
+      <p className={`text-base leading-relaxed ${interim ? 'italic text-muted-foreground' : ''}`}>
+        {text}
+        {interim && <span className="text-muted-foreground"> …</span>}
+      </p>
     </div>
   );
 }
@@ -269,18 +263,20 @@ function ConnectionBadge({ state }: { state: ReplayState }) {
     not_found: 'Session ended',
   }[state.connection];
   const dot = {
-    waking: 'bg-sky-400 animate-pulse',
-    connecting: 'bg-amber-400 animate-pulse',
-    open: 'bg-emerald-500',
-    reconnecting: 'bg-amber-400 animate-pulse',
-    offline: 'bg-red-500',
-    not_found: 'bg-neutral-400',
+    waking: 'bg-signal/60 animate-pulse',
+    connecting: 'bg-signal animate-pulse',
+    open: 'bg-foreground',
+    reconnecting: 'bg-signal animate-pulse',
+    offline: 'bg-destructive',
+    not_found: 'bg-muted-foreground',
   }[state.connection];
   return (
-    <p className="flex items-center gap-2 text-xs text-neutral-600" role="status">
+    <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
       <span aria-hidden="true" className={`size-2 rounded-full ${dot}`} />
       {label}
-      {state.playback !== 'idle' && <span className="text-neutral-400">· {state.playback}</span>}
+      {state.playback !== 'idle' && (
+        <span className="text-muted-foreground/70">· {state.playback}</span>
+      )}
     </p>
   );
 }
@@ -295,15 +291,15 @@ function StatusBanner({
   onDismiss: () => void;
 }) {
   const tone = {
-    info: 'border-sky-200 bg-sky-50 text-sky-900',
-    warning: 'border-amber-200 bg-amber-50 text-amber-900',
-    error: 'border-red-200 bg-red-50 text-red-900',
+    info: 'border-border bg-card text-foreground',
+    warning: 'border-signal/40 bg-card text-foreground',
+    error: 'border-destructive/40 bg-card text-destructive',
   }[banner.level];
   const actionLabel = { retry: 'Retry', reconnect: 'Reconnect', restart: 'Start a new replay' };
   return (
     <div
       role="alert"
-      className={`flex flex-wrap items-center gap-3 rounded-lg border px-4 py-2 text-sm ${tone}`}
+      className={`flex flex-wrap items-center gap-3 rounded-sm border px-4 py-2 text-sm ${tone}`}
     >
       <span className="flex-1">{banner.message}</span>
       {banner.action && (

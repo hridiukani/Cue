@@ -16,10 +16,10 @@ import { useAudioSync } from './use-audio-sync';
 type Tone = 'ok' | 'warn' | 'error' | 'muted';
 
 const TONE: Record<Tone, string> = {
-  ok: 'border-emerald-200 bg-emerald-50 text-emerald-900',
-  warn: 'border-amber-200 bg-amber-50 text-amber-900',
-  error: 'border-red-200 bg-red-50 text-red-900',
-  muted: 'border-neutral-200 bg-neutral-50 text-neutral-700',
+  ok: 'border-border bg-card text-foreground',
+  warn: 'border-signal/40 bg-card text-foreground',
+  error: 'border-destructive/40 bg-card text-destructive',
+  muted: 'border-border bg-secondary text-foreground',
 };
 
 function describe(s: AudioSyncSnapshot | null): { tone: Tone; text: string } {
@@ -95,7 +95,7 @@ export function AudioTrack({
 
   return (
     <div
-      className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm ${TONE[tone]}`}
+      className={`flex flex-wrap items-center gap-3 rounded-sm border px-3 py-2 text-sm ${TONE[tone]}`}
     >
       {/* preload=metadata: only the header until playback starts; seeking uses Range requests. */}
       <audio ref={audioRef} src={src} preload="metadata" muted={muted} className="hidden" />
