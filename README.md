@@ -8,6 +8,7 @@
 
 _Placeholders, to be filled in:_
 
+- [ ] `docs/media/landing.png`: the public landing page at `/`
 - [ ] `docs/media/library.png`: the call library, with dataset, duration and audio filters
 - [ ] `docs/media/replay.gif`: a replay at 1×, transcript streaming in, a suggestion appearing just after the prospect stops
 - [ ] `docs/media/latency.png`: the `/latency` page (p50/p95 for each stage)
@@ -48,7 +49,7 @@ flowchart LR
 
 | Path               | What it is                                                                             |
 | ------------------ | -------------------------------------------------------------------------------------- |
-| `apps/web`         | Next.js (App Router) + Tailwind: sign-in, call library, replay page, `/latency`        |
+| `apps/web`         | Next.js (App Router) + Tailwind: landing page, sign-in, call library, replay, latency  |
 | `apps/realtime`    | Node 20, Fastify + `ws`: replay sessions, suggestion engine, WebSocket protocol        |
 | `packages/db`      | Drizzle ORM + Postgres: schema, migrations, ownership-scoped repositories              |
 | `packages/shared`  | zod schemas shared by everything (protocol, timings, tickets)                          |
@@ -102,12 +103,22 @@ Measured numbers come from the app's `/latency` page: p50/p95 over my own replay
 - **deterministic checks:** at most 20 words, one line, no preamble;
 - **an LLM judge:** a different model, grading against a per-case rubric.
 
-| Prompt     | Pass rate | Mean score (1–5) | Lines over 20 words | First token p50 / p95 (model time) | Cost / 1,000 |
-| ---------- | --------- | ---------------- | ------------------- | ---------------------------------- | ------------ |
-| suggest-v1 | ‹fill›    | ‹fill›           | ‹fill›              | ‹fill›                             | ‹fill›       |
-| suggest-v2 | ‹fill›    | ‹fill›           | ‹fill›              | ‹fill›                             | ‹fill›       |
+| Prompt                      | Pass rate      | Mean score (1–5) | Lines over 20 words | First token p50 / p95 (model time) | Cost / 1,000 |
+| --------------------------- | -------------- | ---------------- | ------------------- | ---------------------------------- | ------------ |
+| suggest-v1                  | 43.4% (56/129) | 3.71             | 29/129 (max 43)     | 314 / 499 ms                       | $0.0674      |
+| suggest-v2 (**production**) | 62.0% (80/129) | 4.05             | 4/129 (max 22)      | 408 / 699 ms                       | $0.1070      |
 
-‹n cases × n runs, judge model, judge settings, date›. The current numbers and their caveats are in [packages/evals/README.md](packages/evals/README.md#current-results-suggest-v1-vs-suggest-v2).
+**Setup:** 43 cases × 3 runs, every line graded. Model under test `openai/gpt-oss-20b`; judge `openai/gpt-oss-120b` (judge-v1). Run 2026-11-19/20.
+
+**Caveats:**
+
+- **v2 got worse in two categories:** competitor objections (55.6% → 33.3%) and stakeholder approval (61.9% → 52.4%).
+- **The judge settings were mixed** across both runs, before they were pinned to low effort.
+- **The rubrics are still drafts.**
+
+Details are in [packages/evals/README.md](packages/evals/README.md#current-results-suggest-v1-vs-suggest-v2).
+
+The eval's first-token numbers are higher than the deployed 325 ms p50. The harness measures model time alone, on a different day and network, so the two aren't directly comparable.
 
 **CI:**
 
@@ -148,7 +159,7 @@ Measured numbers come from the app's `/latency` page: p50/p95 over my own replay
 ## What I'd build next
 
 1. **Live speech-to-text** (streaming STT with endpointing) behind the existing `CallSource` interface, then a live microphone source. Measure the STT row of the latency budget.
-2. **End-to-end latency from real deployed sessions**, with p50/p95 tracked over time, not only per page load.
+2. **Latency tracked over time.** The first deployed numbers are in (379 / 909 ms end to end). Next is p50/p95 per day and per prompt version, so a regression shows up as a trend rather than a single page load.
 3. **Fix the competitor-objection regression** from suggest-v2 (55.6% → 33.3%) without losing the length gains, then re-baseline both prompts with the pinned judge.
 4. **Have a person review the eval rubrics.** All of them are still drafts, so part of the measured gains may be the prompt matching the rubric's wording.
 5. **Measure prompt caching.** Check whether the static-first order actually earns cached-token discounts and lower time to first token.
