@@ -19,7 +19,11 @@ export function audioPlaybackEnabled(): boolean {
  */
 export function getBlobStore(): BlobStore {
   globalForBlobs.cueBlobs ??= new LocalFsBlobStore(
-    serverConfig().blobStoreDir ?? path.resolve(process.cwd(), '..', '..', 'data', 'blobs'),
+    serverConfig().blobStoreDir ??
+      // turbopackIgnore: a runtime folder, not a build input. Without it the
+      // bundler traces this path and reads every recording's audio (real-sales
+      // WAVs, no license) into the build. next.config.ts also excludes data/.
+      path.resolve(/* turbopackIgnore: true */ process.cwd(), '..', '..', 'data', 'blobs'),
   );
   return globalForBlobs.cueBlobs;
 }

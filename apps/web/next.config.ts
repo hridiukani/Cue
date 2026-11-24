@@ -13,6 +13,12 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Workspace packages ship TypeScript source; let Next compile them.
   transpilePackages: ['@cue/db', '@cue/shared', '@cue/storage'],
+  // Never trace imported recordings into a build: ./data holds dataset audio
+  // (real-sales WAVs have no license and are ~150 MB each). Paths are relative
+  // to apps/web.
+  outputFileTracingExcludes: {
+    '*': ['../../data/**', '**/*.wav', '**/*.pcm'],
+  },
   // Keep every page out of search indexes (robots.txt says the same).
   headers: () =>
     Promise.resolve([

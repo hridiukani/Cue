@@ -93,3 +93,12 @@ describe('X-Robots-Tag', () => {
     ]);
   });
 });
+
+describe('build tracing', () => {
+  it('never traces imported recordings (data/, audio files) into a build', async () => {
+    const { default: nextConfig } = await import('../next.config');
+    expect(nextConfig.outputFileTracingExcludes?.['*']).toEqual(
+      expect.arrayContaining(['../../data/**', '**/*.wav']),
+    );
+  });
+});
