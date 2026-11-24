@@ -3,7 +3,9 @@ import { redirect } from 'next/navigation';
 import { SIGNIN_ERROR, signIn } from '@/auth';
 import { safeRedirectPath } from '@/lib/paths';
 import { getCurrentUser } from '@/server/session';
+import { CueLogo } from '@/components/cue-logo';
 import { SubmitButton } from '@/components/submit-button';
+import { Notice } from '@/components/ui';
 
 export const metadata: Metadata = { title: 'Sign in · Cue' };
 
@@ -35,22 +37,26 @@ export default async function SignInPage({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight">Cue</h1>
-        <p className="mt-1 text-sm text-neutral-600">Real-time coaching for sales calls.</p>
+    <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6">
+      <div className="flex h-16 items-stretch border-b border-border">
+        <CueLogo href="/signin" />
+      </div>
+      <div className="flex flex-1 flex-col justify-center py-16">
+        <h1 className="max-w-3xl font-serif text-5xl leading-tight tracking-tight sm:text-6xl">
+          One short line to say next, while you&apos;re still on the call.
+        </h1>
+        <p className="mt-6 max-w-2xl text-lg text-muted-foreground">
+          Cue listens to both sides of a sales call and suggests your next line in under a second.
+        </p>
 
         {error && (
-          <p
-            role="alert"
-            className="mt-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
-          >
-            {error}
-          </p>
+          <div className="mt-8 max-w-xl">
+            <Notice tone="error">{error}</Notice>
+          </div>
         )}
 
-        <form action={signInWithGitHub} className="mt-6">
-          <SubmitButton className="w-full" pendingLabel="Redirecting to GitHub…">
+        <form action={signInWithGitHub} className="mt-10">
+          <SubmitButton pendingLabel="Redirecting to GitHub…">
             <GitHubMark />
             Continue with GitHub
           </SubmitButton>
