@@ -16,7 +16,11 @@ export default defineConfig({
     projects: [
       {
         resolve,
-        test: { name: 'unit', environment: 'node', include: ['src/**/*.test.ts'] },
+        test: {
+          name: 'unit',
+          environment: 'node',
+          include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+        },
       },
       {
         resolve,
