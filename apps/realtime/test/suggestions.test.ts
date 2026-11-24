@@ -14,7 +14,7 @@ import {
 } from '@cue/db';
 import { SYSTEM_PROMPT } from '@cue/suggest';
 import { eq } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 import { Client, makeUser, startServer } from './helpers';
 
 /**
@@ -471,15 +471,26 @@ describe('suggestions end to end (replay + mocked LLM)', () => {
       expect(c.of('suggestionDropped')).toHaveLength(0);
 
       const sessionId = c.of('session')[0]?.sessionId ?? '';
-      const rows = await db
-        .select({
-          status: schema.suggestions.status,
-          skipReason: schema.suggestions.skipReason,
-          utteranceId: schema.suggestions.utteranceId,
-          requestSentAt: schema.suggestions.requestSentAt,
-        })
-        .from(schema.suggestions)
-        .where(eq(schema.suggestions.callId, sessionId));
+      const readRows = () =>
+        db
+          .select({
+            status: schema.suggestions.status,
+            skipReason: schema.suggestions.skipReason,
+            utteranceId: schema.suggestions.utteranceId,
+            requestSentAt: schema.suggestions.requestSentAt,
+          })
+          .from(schema.suggestions)
+          .where(eq(schema.suggestions.callId, sessionId));
+      // The 'complete' write lands after the browser gets suggestionCompleted (the
+      // database stays off the token path), so wait for both rows to be written.
+      const rows = await vi.waitFor(
+        async () => {
+          const r = await readRows();
+          expect(r.filter((x) => x.status === 'complete')).toHaveLength(2);
+          return r;
+        },
+        { timeout: 3000, interval: 50 },
+      );
       const skipped = rows.filter((r) => r.status === 'skipped');
       expect(skipped.map((r) => finals.get(r.utteranceId)).sort()).toEqual(['sure', 'yeah']);
       expect(skipped.every((r) => r.skipReason === 'prospect_backchannel')).toBe(true);
