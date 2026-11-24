@@ -1,6 +1,7 @@
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { signOut } from '@/auth';
+import { AppNav } from '@/components/app-nav';
+import { CueLogo } from '@/components/cue-logo';
 import { SubmitButton } from '@/components/submit-button';
 import { requireUser } from '@/server/session';
 
@@ -15,37 +16,25 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3">
-          <div className="flex items-center gap-6">
-            <Link href="/playbooks" className="text-lg font-semibold tracking-tight">
-              Cue
-            </Link>
-            <nav className="flex gap-4 text-sm">
-              <Link href="/playbooks" className="text-neutral-600 hover:text-neutral-900">
-                Playbooks
-              </Link>
-              <Link href="/calls" className="text-neutral-600 hover:text-neutral-900">
-                Calls
-              </Link>
-              <Link href="/latency" className="text-neutral-600 hover:text-neutral-900">
-                Latency
-              </Link>
-            </nav>
+      <header className="border-b border-border">
+        <div className="mx-auto flex h-16 max-w-6xl items-stretch justify-between gap-6 px-6">
+          <div className="flex items-stretch gap-14">
+            <CueLogo />
+            <AppNav />
           </div>
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="hidden truncate text-sm text-neutral-600 sm:inline">
+          <div className="flex min-w-0 items-center gap-6 text-base">
+            <span className="hidden truncate text-muted-foreground sm:inline">
               {user.name ?? user.email}
             </span>
             <form action={signOutAction}>
-              <SubmitButton variant="ghost" pendingLabel="Signing out…" className="px-3">
+              <SubmitButton variant="link" pendingLabel="Signing out…">
                 Sign out
               </SubmitButton>
             </form>
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-4xl px-4 py-8">{children}</main>
+      <main className="mx-auto max-w-6xl px-6 pb-24 pt-16">{children}</main>
     </div>
   );
 }
