@@ -122,7 +122,7 @@ export default async function CallsPage({
                         <p className="mt-0.5 truncate text-sm text-neutral-600">{r.datasetName}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2 text-xs">
-                        {r.hasAudio && <Badge tone="blue">Audio</Badge>}
+                        {r.hasAudio && <Badge tone="ink">Audio</Badge>}
                         <TimingBadge timing={r.timing} />
                         <span className="w-14 text-right tabular-nums text-neutral-500">
                           {formatDuration(r.durationMs)}

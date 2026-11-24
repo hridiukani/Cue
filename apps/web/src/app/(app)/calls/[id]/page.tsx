@@ -36,18 +36,18 @@ export default async function ReplayPage({ params }: { params: Promise<{ id: str
           <span className="text-neutral-600">{recording.dataset.name}</span>
           <TimingBadge timing={recording.timing} />
           {audio ? (
-            <Badge tone="blue">Audio</Badge>
+            <Badge tone="ink">Audio</Badge>
           ) : (
             recording.hasAudio &&
             (playAudio ? (
               <Badge
-                tone="amber"
+                tone="signal"
                 title="Import with: pnpm ingest -- --dataset real-sales --with-audio"
               >
                 Audio not downloaded
               </Badge>
             ) : (
-              <Badge tone="amber" title="This deployment hosts transcripts only">
+              <Badge tone="neutral" title="This deployment hosts transcripts only">
                 Audio not hosted in this deployment
               </Badge>
             ))
