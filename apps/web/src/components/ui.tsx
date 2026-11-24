@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 /**
@@ -63,5 +64,17 @@ export function Notice({ tone, children }: { tone: 'status' | 'error'; children:
     >
       {children}
     </p>
+  );
+}
+
+/** "← Playbooks": the way back to a list, above a page title. */
+export function BackLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-block font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground hover:text-signal"
+    >
+      ← {children}
+    </Link>
   );
 }

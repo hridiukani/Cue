@@ -4,7 +4,9 @@ import { PLAYBOOK_LIMITS } from '@cue/shared';
 import Link from 'next/link';
 import { useActionState, useId, useState } from 'react';
 import { buttonClass } from '@/components/button-styles';
+import { errorTextClass, fieldClass, hintClass, labelClass } from '@/components/form-styles';
 import { SubmitButton } from '@/components/submit-button';
+import { Eyebrow, Notice } from '@/components/ui';
 import { FIELD } from '@/lib/playbook-form';
 import type { PlaybookFormState } from './actions';
 
@@ -66,17 +68,10 @@ export function PlaybookForm({
   };
 
   return (
-    <form action={formAction} className="space-y-8" noValidate>
-      {state.status === 'error' && (
-        <div
-          role="alert"
-          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-        >
-          {state.message}
-        </div>
-      )}
+    <form action={formAction} className="space-y-12" noValidate>
+      {state.status === 'error' && <Notice tone="error">{state.message}</Notice>}
 
-      <section className="space-y-5">
+      <section className="space-y-6">
         <TextField
           label="Name"
           name={FIELD.name}
@@ -113,36 +108,39 @@ export function PlaybookForm({
         />
       </section>
 
-      <section aria-labelledby="objections-heading" className="space-y-4">
+      <section
+        aria-labelledby="objections-heading"
+        className="space-y-6 border-t border-border pt-10"
+      >
         <div>
-          <h2 id="objections-heading" className="text-base font-semibold">
+          <h2 id="objections-heading" className="font-serif text-2xl tracking-tight">
             Objections
           </h2>
-          <p className="text-sm text-neutral-600">
+          <p className="mt-2 text-muted-foreground">
             Pushback you expect, and a good way to answer it. Cue uses these when suggesting lines.
           </p>
         </div>
 
-        {errors.objections && <p className="text-sm text-red-700">{errors.objections}</p>}
+        {errors.objections && <p className="text-sm text-destructive">{errors.objections}</p>}
 
         {rows.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-neutral-300 px-4 py-6 text-center text-sm text-neutral-500">
+          <p className="border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
             No objections yet.
           </p>
         ) : (
-          <ol className="space-y-4">
+          <ol className="space-y-8">
             {rows.map((row, i) => (
-              <li key={row.key} className="rounded-xl border border-neutral-200 bg-white p-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-                    Objection {i + 1}
-                  </span>
+              <li key={row.key} className="border-l-2 border-signal pl-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <Eyebrow>
+                    <span className="text-signal">{String(i + 1).padStart(2, '0')}</span> Objection
+                  </Eyebrow>
                   <button
                     type="button"
                     onClick={() => {
                       removeRow(row.key);
                     }}
-                    className="rounded text-sm text-neutral-500 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-neutral-900"
+                    className="text-sm text-muted-foreground hover:text-destructive focus-visible:outline-2 focus-visible:outline-ring"
                     aria-label={`Remove objection ${String(i + 1)}`}
                   >
                     Remove
@@ -188,7 +186,7 @@ export function PlaybookForm({
         )}
       </section>
 
-      <section>
+      <section className="border-t border-border pt-10">
         <TextField
           label="Tone notes"
           name={FIELD.toneNotes}
@@ -203,7 +201,7 @@ export function PlaybookForm({
         />
       </section>
 
-      <div className="flex items-center justify-end gap-3 border-t border-neutral-200 pt-6">
+      <div className="flex items-center justify-end gap-3 border-t border-rule pt-8">
         <Link href="/playbooks" className={buttonClass('ghost')}>
           Cancel
         </Link>
@@ -247,11 +245,7 @@ function TextField({
   const describedBy = [hint && !error ? hintId : null, error ? errorId : null]
     .filter(Boolean)
     .join(' ');
-  const inputClass = `block w-full rounded-lg border bg-white px-3 py-2 text-sm shadow-sm placeholder:text-neutral-400 focus:outline-none focus:ring-2 ${
-    error
-      ? 'border-red-400 focus:border-red-500 focus:ring-red-200'
-      : 'border-neutral-300 focus:border-neutral-500 focus:ring-neutral-200'
-  }`;
+  const inputClass = fieldClass(Boolean(error));
   const shared = {
     id,
     name,
@@ -266,9 +260,9 @@ function TextField({
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-sm font-medium text-neutral-900">
+      <label htmlFor={id} className={labelClass}>
         {label}
-        {optional && <span className="ml-1 font-normal text-neutral-500">(optional)</span>}
+        {optional && <span className="ml-1 font-normal text-muted-foreground">(optional)</span>}
       </label>
       {multiline ? (
         <textarea
@@ -288,12 +282,12 @@ function TextField({
         />
       )}
       {hint && !error && (
-        <p id={hintId} className="text-xs text-neutral-500">
+        <p id={hintId} className={hintClass}>
           {hint}
         </p>
       )}
       {error && (
-        <p id={errorId} className="text-xs text-red-700">
+        <p id={errorId} className={errorTextClass}>
           {error}
         </p>
       )}

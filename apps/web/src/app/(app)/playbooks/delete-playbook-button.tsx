@@ -21,13 +21,13 @@ export function DeletePlaybookButton({
   return (
     <div className="space-y-3">
       {state.status === 'error' && (
-        <p role="alert" className="text-sm text-red-700">
+        <p role="alert" className="text-sm text-destructive">
           {state.message}
         </p>
       )}
       {confirming ? (
         <form action={formAction} className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-neutral-700">
+          <span className="text-sm text-foreground">
             Delete <strong className="font-medium">{playbookName}</strong>? This can’t be undone.
           </span>
           <SubmitButton variant="danger" pendingLabel="Deleting…">

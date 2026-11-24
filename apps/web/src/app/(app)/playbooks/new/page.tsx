@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { BackLink, PageHeader } from '@/components/ui';
 import { requireUser } from '@/server/session';
 import { createPlaybookAction } from '../actions';
 import { PlaybookForm } from '../playbook-form';
@@ -9,25 +9,28 @@ export const metadata: Metadata = { title: 'New playbook · Cue' };
 export default async function NewPlaybookPage() {
   await requireUser();
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <Link href="/playbooks" className="text-sm text-neutral-500 hover:text-neutral-900">
-          ← Playbooks
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">New playbook</h1>
+    <div className="mx-auto max-w-3xl">
+      <BackLink href="/playbooks">Playbooks</BackLink>
+      <div className="mt-6">
+        <PageHeader
+          title="New playbook"
+          subtitle="What you sell, who it's for, and the pushback you expect."
+        />
       </div>
-      <PlaybookForm
-        action={createPlaybookAction}
-        initial={{
-          name: '',
-          productDescription: '',
-          idealCustomer: '',
-          toneNotes: '',
-          objections: [{ objection: '', good_response: '' }],
-        }}
-        submitLabel="Create playbook"
-        pendingLabel="Creating…"
-      />
+      <div className="mt-10">
+        <PlaybookForm
+          action={createPlaybookAction}
+          initial={{
+            name: '',
+            productDescription: '',
+            idealCustomer: '',
+            toneNotes: '',
+            objections: [{ objection: '', good_response: '' }],
+          }}
+          submitLabel="Create playbook"
+          pendingLabel="Creating…"
+        />
+      </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { getPlaybook } from '@cue/db';
 import type { Metadata } from 'next';
-import Link from 'next/link';
+import { BackLink, Eyebrow, PageHeader } from '@/components/ui';
 import { notFound } from 'next/navigation';
 import { getDb } from '@/server/db';
 import { requireUser } from '@/server/session';
@@ -18,30 +18,30 @@ export default async function EditPlaybookPage({ params }: { params: Promise<{ i
   if (!playbook) notFound();
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <Link href="/playbooks" className="text-sm text-neutral-500 hover:text-neutral-900">
-          ← Playbooks
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Edit playbook</h1>
+    <div className="mx-auto max-w-3xl">
+      <BackLink href="/playbooks">Playbooks</BackLink>
+      <div className="mt-6">
+        <PageHeader title={playbook.name} subtitle="Edit what Cue knows about this sale." />
       </div>
 
-      <PlaybookForm
-        action={updatePlaybookAction.bind(null, playbook.id)}
-        initial={{
-          name: playbook.name,
-          productDescription: playbook.productDescription,
-          idealCustomer: playbook.idealCustomer,
-          toneNotes: playbook.toneNotes ?? '',
-          objections: playbook.objections,
-        }}
-        submitLabel="Save changes"
-        pendingLabel="Saving…"
-      />
+      <div className="mt-10">
+        <PlaybookForm
+          action={updatePlaybookAction.bind(null, playbook.id)}
+          initial={{
+            name: playbook.name,
+            productDescription: playbook.productDescription,
+            idealCustomer: playbook.idealCustomer,
+            toneNotes: playbook.toneNotes ?? '',
+            objections: playbook.objections,
+          }}
+          submitLabel="Save changes"
+          pendingLabel="Saving…"
+        />
+      </div>
 
-      <section className="rounded-xl border border-red-200 bg-white p-5">
-        <h2 className="text-sm font-semibold text-red-900">Danger zone</h2>
-        <p className="mt-1 mb-4 text-sm text-neutral-600">
+      <section className="mt-16 border-t border-border pt-8">
+        <Eyebrow className="text-destructive">Danger zone</Eyebrow>
+        <p className="mt-3 mb-5 text-sm text-muted-foreground">
           Deleting removes this playbook for good. Playbooks used by recorded calls can’t be
           deleted.
         </p>
